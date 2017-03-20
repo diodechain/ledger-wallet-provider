@@ -27,8 +27,13 @@
     "babel-preset-es2017": "^6.22.0"
   },
   "dependencies": {
+    "babel-loader": "^6.4.1",
+    "babel-plugin-add-module-exports": "^0.2.1",
+    "babel-plugin-transform-es2015-modules-amd": "^6.24.0",
+    "json-loader": "^0.5.4",
     "ledgerco": "^1.1.2",
     "u2f-api": "^0.0.9",
-    "web3-provider-engine": "^11.0.0"
+    "web3-provider-engine": "^11.0.0",
+    "webpack": "^2.2.1"
   }
 }
