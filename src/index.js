@@ -1,5 +1,6 @@
 import HookedWalletSubprovider from "web3-provider-engine/subproviders/hooked-wallet.js";
 import LedgerWallet from "./LedgerWallet";
+import StreamProvider from 'web3-stream-provider';
 
 export default async function (rpcUrl) {
     const ledger = new LedgerWallet();
@@ -17,6 +18,7 @@ export default async function (rpcUrl) {
     var engine = new ProviderEngine();
     var web3 = new Web3(engine);
     engine.addProvider(LedgerWalletSubprovider);
+    engine.addProvider(new StreamProvider());
     engine.addProvider(new RpcSubprovider(
       {
         rpcUrl: rpcUrl || "https://kovan.infura.io:443"
