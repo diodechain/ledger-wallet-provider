@@ -37,7 +37,7 @@ const NOT_SUPPORTED_ERROR_MSG =
  *
  */
 class LedgerWallet {
-    constructor() {
+    constructor(opts) {        
         this._path = "44'/60'/0'/0";
         this._accounts = undefined;
         this.isU2FSupported = null;
@@ -45,10 +45,24 @@ class LedgerWallet {
         this.getAccounts = this.getAccounts.bind(this);
         this.signTransaction = this.signTransaction.bind(this);
         this._getLedgerConnection = this._getLedgerConnection.bind(this);
+        this._onSubmit = opts.onSubmit;
+        this._onSigned = opts.onSigned;
     }
 
     async init() {
         this.isU2FSupported = await LedgerWallet.isSupported();
+    }
+
+    showSpinner () {
+      if (this._onSubmit) {
+        this._onSubmit();
+      }
+    }
+
+    closeSpinner () {
+      if (this._onSigned) {
+        this._onSigned();
+      }
     }
 
     /**
@@ -147,12 +161,18 @@ class LedgerWallet {
             callback(new Error(NOT_SUPPORTED_ERROR_MSG));
             return;
         }
+
+        this.showSpinner();
+
         // Encode using ethereumjs-tx
         let tx = new EthereumTx(txData);
 
         // Fetch the chain id
         web3.version.getNetwork(async function (error, chain_id) {
-            if (error) callback(error);
+            if (error) {
+              this.closeSpinner();
+              callback(error);
+            }
 
             // Force chain_id to int
             chain_id = 0 | chain_id;
@@ -168,6 +188,7 @@ class LedgerWallet {
             let eth = await this._getLedgerConnection();
             let cleanupCallback = (error, data) => {
                 this._closeLedgerConnection(eth);
+                this.closeSpinner();
                 callback(error, data);
             };
             // Pass to _ledger for signing
