@@ -64,7 +64,7 @@ var ledgerwallet =
 /******/ 	__webpack_require__.p = "";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 281);
+/******/ 	return __webpack_require__(__webpack_require__.s = 283);
 /******/ })
 /************************************************************************/
 /******/ ([
@@ -3578,8 +3578,8 @@ if (typeof Object.create === 'function') {
  */
 
 
-var BigNumber = __webpack_require__(34);
-var sha3 = __webpack_require__(31);
+var BigNumber = __webpack_require__(28);
+var sha3 = __webpack_require__(33);
 var utf8 = __webpack_require__(241);
 
 var unitMap = {
@@ -3919,7 +3919,7 @@ var toBigNumber = function(number) {
  * @return {BigNumber}
  */
 var toTwosComplement = function (number) {
-    var bigNumber = toBigNumber(number);
+    var bigNumber = toBigNumber(number).round();
     if (bigNumber.lessThan(0)) {
         return new BigNumber("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16).plus(bigNumber).plus(1);
     }
@@ -3956,8 +3956,6 @@ var isAddress = function (address) {
         return isChecksumAddress(address);
     }
 };
-
-
 
 /**
  * Checks if the given string is a checksummed address
@@ -4109,6 +4107,38 @@ var isJson = function (str) {
     }
 };
 
+/**
+ * Returns true if given string is a valid Ethereum block header bloom.
+ *
+ * @method isBloom
+ * @param {String} hex encoded bloom filter
+ * @return {Boolean}
+ */
+var isBloom = function (bloom) {
+    if (!/^(0x)?[0-9a-f]{512}$/i.test(bloom)) {
+        return false;
+    } else if (/^(0x)?[0-9a-f]{512}$/.test(bloom) || /^(0x)?[0-9A-F]{512}$/.test(bloom)) {
+        return true;
+    } 
+    return false;
+};
+
+/**
+ * Returns true if given string is a valid log topic.
+ *
+ * @method isTopic
+ * @param {String} hex encoded topic
+ * @return {Boolean}
+ */
+var isTopic = function (topic) {
+    if (!/^(0x)?[0-9a-f]{64}$/i.test(topic)) {
+        return false;
+    } else if (/^(0x)?[0-9a-f]{64}$/.test(topic) || /^(0x)?[0-9A-F]{64}$/.test(topic)) {
+        return true;
+    } 
+    return false;
+};
+
 module.exports = {
     padLeft: padLeft,
     padRight: padRight,
@@ -4137,7 +4167,9 @@ module.exports = {
     isObject: isObject,
     isBoolean: isBoolean,
     isArray: isArray,
-    isJson: isJson
+    isJson: isJson,
+    isBloom: isBloom,
+    isTopic: isTopic,
 };
 
 
@@ -7631,13 +7663,13 @@ $exports.store = store;
     You should have received a copy of the GNU Lesser General Public License
     along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
 */
-/** 
+/**
  * @file formatters.js
  * @author Marek Kotewicz <marek@ethdev.com>
  * @date 2015
  */
 
-var BigNumber = __webpack_require__(34);
+var BigNumber = __webpack_require__(28);
 var utils = __webpack_require__(4);
 var c = __webpack_require__(44);
 var SolidityParam = __webpack_require__(96);
@@ -7654,7 +7686,7 @@ var SolidityParam = __webpack_require__(96);
  */
 var formatInputInt = function (value) {
     BigNumber.config(c.ETH_BIGNUMBER_ROUNDING_MODE);
-    var result = utils.padLeft(utils.toTwosComplement(value).round().toString(16), 64);
+    var result = utils.padLeft(utils.toTwosComplement(value).toString(16), 64);
     return new SolidityParam(result);
 };
 
@@ -7775,7 +7807,7 @@ var formatOutputUInt = function (param) {
  * @returns {BigNumber} input bytes formatted to real
  */
 var formatOutputReal = function (param) {
-    return formatOutputInt(param).dividedBy(new BigNumber(2).pow(128)); 
+    return formatOutputInt(param).dividedBy(new BigNumber(2).pow(128));
 };
 
 /**
@@ -7786,7 +7818,7 @@ var formatOutputReal = function (param) {
  * @returns {BigNumber} input bytes formatted to ureal
  */
 var formatOutputUReal = function (param) {
-    return formatOutputUInt(param).dividedBy(new BigNumber(2).pow(128)); 
+    return formatOutputUInt(param).dividedBy(new BigNumber(2).pow(128));
 };
 
 /**
@@ -7805,10 +7837,13 @@ var formatOutputBool = function (param) {
  *
  * @method formatOutputBytes
  * @param {SolidityParam} left-aligned hex representation of string
+ * @param {String} name type name
  * @returns {String} hex string
  */
-var formatOutputBytes = function (param) {
-    return '0x' + param.staticPart();
+var formatOutputBytes = function (param, name) {
+    var matches = name.match(/^bytes([0-9]*)/);
+    var size = parseInt(matches[1]);
+    return '0x' + param.staticPart().slice(0, 2 * size);
 };
 
 /**
@@ -7864,7 +7899,6 @@ module.exports = {
     formatOutputString: formatOutputString,
     formatOutputAddress: formatOutputAddress
 };
-
 
 
 /***/ }),
@@ -8123,18 +8157,27 @@ SolidityType.prototype.isType = function (name) {
  * @return {Number} length of static part in bytes
  */
 SolidityType.prototype.staticPartLength = function (name) {
-    throw "this method should be overrwritten for type: " + name;
+    // If name isn't an array then treat it like a single element array.
+    return (this.nestedTypes(name) || ['[1]'])
+        .map(function (type) {
+            // the length of the nested array
+            return parseInt(type.slice(1, -1), 10) || 1;
+        })
+        .reduce(function (previous, current) {
+            return previous * current;
+        // all basic types are 32 bytes long
+        }, 32);
 };
 
 /**
  * Should be used to determine if type is dynamic array
- * eg: 
+ * eg:
  * "type[]" => true
  * "type[4]" => false
  *
  * @method isDynamicArray
  * @param {String} name
- * @return {Bool} true if the type is dynamic array 
+ * @return {Bool} true if the type is dynamic array
  */
 SolidityType.prototype.isDynamicArray = function (name) {
     var nestedTypes = this.nestedTypes(name);
@@ -8143,13 +8186,13 @@ SolidityType.prototype.isDynamicArray = function (name) {
 
 /**
  * Should be used to determine if type is static array
- * eg: 
+ * eg:
  * "type[]" => false
  * "type[4]" => true
  *
  * @method isStaticArray
  * @param {String} name
- * @return {Bool} true if the type is static array 
+ * @return {Bool} true if the type is static array
  */
 SolidityType.prototype.isStaticArray = function (name) {
     var nestedTypes = this.nestedTypes(name);
@@ -8158,7 +8201,7 @@ SolidityType.prototype.isStaticArray = function (name) {
 
 /**
  * Should return length of static array
- * eg. 
+ * eg.
  * "int[32]" => 32
  * "int256[14]" => 14
  * "int[2][3]" => 3
@@ -8233,7 +8276,7 @@ SolidityType.prototype.nestedTypes = function (name) {
  * Should be used to encode the value
  *
  * @method encode
- * @param {Object} value 
+ * @param {Object} value
  * @param {String} name
  * @return {String} encoded value
  */
@@ -8247,7 +8290,7 @@ SolidityType.prototype.encode = function (value, name) {
 
             var result = [];
             result.push(f.formatInputInt(length).encode());
-            
+
             value.forEach(function (v) {
                 result.push(self.encode(v, nestedName));
             });
@@ -8323,18 +8366,19 @@ SolidityType.prototype.decode = function (bytes, offset, name) {
             return result;
         })();
     } else if (this.isDynamicType(name)) {
-        
+
         return (function () {
             var dynamicOffset = parseInt('0x' + bytes.substr(offset * 2, 64));      // in bytes
             var length = parseInt('0x' + bytes.substr(dynamicOffset * 2, 64));      // in bytes
             var roundedLength = Math.floor((length + 31) / 32);                     // in int
-        
-            return self._outputFormatter(new SolidityParam(bytes.substr(dynamicOffset * 2, ( 1 + roundedLength) * 64), 0));
+            var param = new SolidityParam(bytes.substr(dynamicOffset * 2, ( 1 + roundedLength) * 64), 0);
+            return self._outputFormatter(param, name);
         })();
     }
 
     var length = this.staticPartLength(name);
-    return this._outputFormatter(new SolidityParam(bytes.substr(offset * 2, length * 2)));
+    var param = new SolidityParam(bytes.substr(offset * 2, length * 2));
+    return this._outputFormatter(param, name);
 };
 
 module.exports = SolidityType;
@@ -8360,7 +8404,7 @@ module.exports = SolidityType;
     You should have received a copy of the GNU Lesser General Public License
     along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
 */
-/** 
+/**
  * @file formatters.js
  * @author Marek Kotewicz <marek@ethdev.com>
  * @author Fabian Vogelsteller <fabian@ethdev.com>
@@ -8427,7 +8471,7 @@ var inputCallFormatter = function (options){
         options[key] = utils.fromDecimal(options[key]);
     });
 
-    return options; 
+    return options;
 };
 
 /**
@@ -8452,12 +8496,12 @@ var inputTransactionFormatter = function (options){
         options[key] = utils.fromDecimal(options[key]);
     });
 
-    return options; 
+    return options;
 };
 
 /**
  * Formats the output of a transaction to its proper values
- * 
+ *
  * @method outputTransactionFormatter
  * @param {Object} tx
  * @returns {Object}
@@ -8476,7 +8520,7 @@ var outputTransactionFormatter = function (tx){
 
 /**
  * Formats the output of a transaction receipt to its proper values
- * 
+ *
  * @method outputTransactionReceiptFormatter
  * @param {Object} receipt
  * @returns {Object}
@@ -8502,7 +8546,7 @@ var outputTransactionReceiptFormatter = function (receipt){
  * Formats the output of a block to its proper values
  *
  * @method outputBlockFormatter
- * @param {Object} block 
+ * @param {Object} block
  * @returns {Object}
 */
 var outputBlockFormatter = function(block) {
@@ -8530,7 +8574,7 @@ var outputBlockFormatter = function(block) {
 
 /**
  * Formats the output of a log
- * 
+ *
  * @method outputLogFormatter
  * @param {Object} log object
  * @returns {Object} log
@@ -8571,7 +8615,7 @@ var inputPostFormatter = function(post) {
         return (topic.indexOf('0x') === 0) ? topic : utils.fromUtf8(topic);
     });
 
-    return post; 
+    return post;
 };
 
 /**
@@ -8623,6 +8667,10 @@ var outputSyncingFormatter = function(result) {
     result.startingBlock = utils.toDecimal(result.startingBlock);
     result.currentBlock = utils.toDecimal(result.currentBlock);
     result.highestBlock = utils.toDecimal(result.highestBlock);
+    if (result.knownStates) {
+        result.knownStates = utils.toDecimal(result.knownStates);
+        result.pulledStates = utils.toDecimal(result.pulledStates);
+    }
 
     return result;
 };
@@ -8702,7 +8750,7 @@ var processNextTick = __webpack_require__(60);
 /*</replacement>*/
 
 /*<replacement>*/
-var util = __webpack_require__(29);
+var util = __webpack_require__(31);
 util.inherits = __webpack_require__(2);
 /*</replacement>*/
 
@@ -8758,6 +8806,177 @@ function forEach(xs, f) {
 /* 17 */
 /***/ (function(module, exports, __webpack_require__) {
 
+/*
+    This file is part of web3.js.
+
+    web3.js is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    web3.js is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public License
+    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
+*/
+/**
+ * @file method.js
+ * @author Marek Kotewicz <marek@ethdev.com>
+ * @date 2015
+ */
+
+var utils = __webpack_require__(4);
+var errors = __webpack_require__(34);
+
+var Method = function (options) {
+    this.name = options.name;
+    this.call = options.call;
+    this.params = options.params || 0;
+    this.inputFormatter = options.inputFormatter;
+    this.outputFormatter = options.outputFormatter;
+    this.requestManager = null;
+};
+
+Method.prototype.setRequestManager = function (rm) {
+    this.requestManager = rm;
+};
+
+/**
+ * Should be used to determine name of the jsonrpc method based on arguments
+ *
+ * @method getCall
+ * @param {Array} arguments
+ * @return {String} name of jsonrpc method
+ */
+Method.prototype.getCall = function (args) {
+    return utils.isFunction(this.call) ? this.call(args) : this.call;
+};
+
+/**
+ * Should be used to extract callback from array of arguments. Modifies input param
+ *
+ * @method extractCallback
+ * @param {Array} arguments
+ * @return {Function|Null} callback, if exists
+ */
+Method.prototype.extractCallback = function (args) {
+    if (utils.isFunction(args[args.length - 1])) {
+        return args.pop(); // modify the args array!
+    }
+};
+
+/**
+ * Should be called to check if the number of arguments is correct
+ * 
+ * @method validateArgs
+ * @param {Array} arguments
+ * @throws {Error} if it is not
+ */
+Method.prototype.validateArgs = function (args) {
+    if (args.length !== this.params) {
+        throw errors.InvalidNumberOfParams();
+    }
+};
+
+/**
+ * Should be called to format input args of method
+ * 
+ * @method formatInput
+ * @param {Array}
+ * @return {Array}
+ */
+Method.prototype.formatInput = function (args) {
+    if (!this.inputFormatter) {
+        return args;
+    }
+
+    return this.inputFormatter.map(function (formatter, index) {
+        return formatter ? formatter(args[index]) : args[index];
+    });
+};
+
+/**
+ * Should be called to format output(result) of method
+ *
+ * @method formatOutput
+ * @param {Object}
+ * @return {Object}
+ */
+Method.prototype.formatOutput = function (result) {
+    return this.outputFormatter && result ? this.outputFormatter(result) : result;
+};
+
+/**
+ * Should create payload from given input args
+ *
+ * @method toPayload
+ * @param {Array} args
+ * @return {Object}
+ */
+Method.prototype.toPayload = function (args) {
+    var call = this.getCall(args);
+    var callback = this.extractCallback(args);
+    var params = this.formatInput(args);
+    this.validateArgs(params);
+
+    return {
+        method: call,
+        params: params,
+        callback: callback
+    };
+};
+
+Method.prototype.attachToObject = function (obj) {
+    var func = this.buildCall();
+    func.call = this.call; // TODO!!! that's ugly. filter.js uses it
+    var name = this.name.split('.');
+    if (name.length > 1) {
+        obj[name[0]] = obj[name[0]] || {};
+        obj[name[0]][name[1]] = func;
+    } else {
+        obj[name[0]] = func; 
+    }
+};
+
+Method.prototype.buildCall = function() {
+    var method = this;
+    var send = function () {
+        var payload = method.toPayload(Array.prototype.slice.call(arguments));
+        if (payload.callback) {
+            return method.requestManager.sendAsync(payload, function (err, result) {
+                payload.callback(err, method.formatOutput(result));
+            });
+        }
+        return method.formatOutput(method.requestManager.send(payload));
+    };
+    send.request = this.request.bind(this);
+    return send;
+};
+
+/**
+ * Should be called to create pure JSONRPC request which can be used in batch request
+ *
+ * @method request
+ * @param {...} params
+ * @return {Object} jsonrpc request
+ */
+Method.prototype.request = function () {
+    var payload = this.toPayload(Array.prototype.slice.call(arguments));
+    payload.format = this.formatOutput.bind(this);
+    return payload;
+};
+
+module.exports = Method;
+
+
+
+/***/ }),
+/* 18 */
+/***/ (function(module, exports, __webpack_require__) {
+
 var isObject = __webpack_require__(38);
 module.exports = function(it){
   if(!isObject(it))throw TypeError(it + ' is not an object!');
@@ -8765,7 +8984,7 @@ module.exports = function(it){
 };
 
 /***/ }),
-/* 18 */
+/* 19 */
 /***/ (function(module, exports, __webpack_require__) {
 
 // Thank's IE8 for his funny defineProperty
@@ -8774,12 +8993,12 @@ module.exports = !__webpack_require__(71)(function(){
 });
 
 /***/ }),
-/* 19 */
+/* 20 */
 /***/ (function(module, exports, __webpack_require__) {
 
-var dP         = __webpack_require__(28)
+var dP         = __webpack_require__(30)
   , createDesc = __webpack_require__(75);
-module.exports = __webpack_require__(18) ? function(object, key, value){
+module.exports = __webpack_require__(19) ? function(object, key, value){
   return dP.f(object, key, createDesc(1, value));
 } : function(object, key, value){
   object[key] = value;
@@ -8787,7 +9006,7 @@ module.exports = __webpack_require__(18) ? function(object, key, value){
 };
 
 /***/ }),
-/* 20 */
+/* 21 */
 /***/ (function(module, exports, __webpack_require__) {
 
 ;(function (root, factory) {
@@ -8927,7 +9146,7 @@ module.exports = __webpack_require__(18) ? function(object, key, value){
 }));
 
 /***/ }),
-/* 21 */
+/* 22 */
 /***/ (function(module, exports, __webpack_require__) {
 
 ;(function (root, factory, undef) {
@@ -9064,7 +9283,7 @@ module.exports = __webpack_require__(18) ? function(object, key, value){
 }));
 
 /***/ }),
-/* 22 */
+/* 23 */
 /***/ (function(module, exports, __webpack_require__) {
 
 ;(function (root, factory) {
@@ -9337,7 +9556,7 @@ module.exports = __webpack_require__(18) ? function(object, key, value){
 }));
 
 /***/ }),
-/* 23 */
+/* 24 */
 /***/ (function(module, exports) {
 
 // Copyright Joyent, Inc. and other Node contributors.
@@ -9645,7 +9864,7 @@ function isUndefined(arg) {
 
 
 /***/ }),
-/* 24 */
+/* 25 */
 /***/ (function(module, exports, __webpack_require__) {
 
 /* WEBPACK VAR INJECTION */(function(Buffer) {// prototype class for hash functions
@@ -9721,7 +9940,7 @@ module.exports = Hash
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0).Buffer))
 
 /***/ }),
-/* 25 */
+/* 26 */
 /***/ (function(module, exports, __webpack_require__) {
 
 // Copyright Joyent, Inc. and other Node contributors.
@@ -9747,7 +9966,7 @@ module.exports = Hash
 
 module.exports = Stream;
 
-var EE = __webpack_require__(23).EventEmitter;
+var EE = __webpack_require__(24).EventEmitter;
 var inherits = __webpack_require__(2);
 
 inherits(Stream, EE);
@@ -9854,1000 +10073,7 @@ Stream.prototype.pipe = function(dest, options) {
 
 
 /***/ }),
-/* 26 */
-/***/ (function(module, exports, __webpack_require__) {
-
-/*
-    This file is part of web3.js.
-
-    web3.js is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    web3.js is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
-*/
-/**
- * @file method.js
- * @author Marek Kotewicz <marek@ethdev.com>
- * @date 2015
- */
-
-var utils = __webpack_require__(4);
-var errors = __webpack_require__(32);
-
-var Method = function (options) {
-    this.name = options.name;
-    this.call = options.call;
-    this.params = options.params || 0;
-    this.inputFormatter = options.inputFormatter;
-    this.outputFormatter = options.outputFormatter;
-    this.requestManager = null;
-};
-
-Method.prototype.setRequestManager = function (rm) {
-    this.requestManager = rm;
-};
-
-/**
- * Should be used to determine name of the jsonrpc method based on arguments
- *
- * @method getCall
- * @param {Array} arguments
- * @return {String} name of jsonrpc method
- */
-Method.prototype.getCall = function (args) {
-    return utils.isFunction(this.call) ? this.call(args) : this.call;
-};
-
-/**
- * Should be used to extract callback from array of arguments. Modifies input param
- *
- * @method extractCallback
- * @param {Array} arguments
- * @return {Function|Null} callback, if exists
- */
-Method.prototype.extractCallback = function (args) {
-    if (utils.isFunction(args[args.length - 1])) {
-        return args.pop(); // modify the args array!
-    }
-};
-
-/**
- * Should be called to check if the number of arguments is correct
- * 
- * @method validateArgs
- * @param {Array} arguments
- * @throws {Error} if it is not
- */
-Method.prototype.validateArgs = function (args) {
-    if (args.length !== this.params) {
-        throw errors.InvalidNumberOfParams();
-    }
-};
-
-/**
- * Should be called to format input args of method
- * 
- * @method formatInput
- * @param {Array}
- * @return {Array}
- */
-Method.prototype.formatInput = function (args) {
-    if (!this.inputFormatter) {
-        return args;
-    }
-
-    return this.inputFormatter.map(function (formatter, index) {
-        return formatter ? formatter(args[index]) : args[index];
-    });
-};
-
-/**
- * Should be called to format output(result) of method
- *
- * @method formatOutput
- * @param {Object}
- * @return {Object}
- */
-Method.prototype.formatOutput = function (result) {
-    return this.outputFormatter && result ? this.outputFormatter(result) : result;
-};
-
-/**
- * Should create payload from given input args
- *
- * @method toPayload
- * @param {Array} args
- * @return {Object}
- */
-Method.prototype.toPayload = function (args) {
-    var call = this.getCall(args);
-    var callback = this.extractCallback(args);
-    var params = this.formatInput(args);
-    this.validateArgs(params);
-
-    return {
-        method: call,
-        params: params,
-        callback: callback
-    };
-};
-
-Method.prototype.attachToObject = function (obj) {
-    var func = this.buildCall();
-    func.call = this.call; // TODO!!! that's ugly. filter.js uses it
-    var name = this.name.split('.');
-    if (name.length > 1) {
-        obj[name[0]] = obj[name[0]] || {};
-        obj[name[0]][name[1]] = func;
-    } else {
-        obj[name[0]] = func; 
-    }
-};
-
-Method.prototype.buildCall = function() {
-    var method = this;
-    var send = function () {
-        var payload = method.toPayload(Array.prototype.slice.call(arguments));
-        if (payload.callback) {
-            return method.requestManager.sendAsync(payload, function (err, result) {
-                payload.callback(err, method.formatOutput(result));
-            });
-        }
-        return method.formatOutput(method.requestManager.send(payload));
-    };
-    send.request = this.request.bind(this);
-    return send;
-};
-
-/**
- * Should be called to create pure JSONRPC request which can be used in batch request
- *
- * @method request
- * @param {...} params
- * @return {Object} jsonrpc request
- */
-Method.prototype.request = function () {
-    var payload = this.toPayload(Array.prototype.slice.call(arguments));
-    payload.format = this.formatOutput.bind(this);
-    return payload;
-};
-
-module.exports = Method;
-
-
-
-/***/ }),
 /* 27 */
-/***/ (function(module, exports) {
-
-module.exports = {};
-
-/***/ }),
-/* 28 */
-/***/ (function(module, exports, __webpack_require__) {
-
-var anObject       = __webpack_require__(17)
-  , IE8_DOM_DEFINE = __webpack_require__(121)
-  , toPrimitive    = __webpack_require__(142)
-  , dP             = Object.defineProperty;
-
-exports.f = __webpack_require__(18) ? Object.defineProperty : function defineProperty(O, P, Attributes){
-  anObject(O);
-  P = toPrimitive(P, true);
-  anObject(Attributes);
-  if(IE8_DOM_DEFINE)try {
-    return dP(O, P, Attributes);
-  } catch(e){ /* empty */ }
-  if('get' in Attributes || 'set' in Attributes)throw TypeError('Accessors not supported!');
-  if('value' in Attributes)O[P] = Attributes.value;
-  return O;
-};
-
-/***/ }),
-/* 29 */
-/***/ (function(module, exports, __webpack_require__) {
-
-/* WEBPACK VAR INJECTION */(function(Buffer) {// Copyright Joyent, Inc. and other Node contributors.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a
-// copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to permit
-// persons to whom the Software is furnished to do so, subject to the
-// following conditions:
-//
-// The above copyright notice and this permission notice shall be included
-// in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
-// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-// USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-// NOTE: These type checking functions intentionally don't use `instanceof`
-// because it is fragile and can be easily faked with `Object.create()`.
-
-function isArray(arg) {
-  if (Array.isArray) {
-    return Array.isArray(arg);
-  }
-  return objectToString(arg) === '[object Array]';
-}
-exports.isArray = isArray;
-
-function isBoolean(arg) {
-  return typeof arg === 'boolean';
-}
-exports.isBoolean = isBoolean;
-
-function isNull(arg) {
-  return arg === null;
-}
-exports.isNull = isNull;
-
-function isNullOrUndefined(arg) {
-  return arg == null;
-}
-exports.isNullOrUndefined = isNullOrUndefined;
-
-function isNumber(arg) {
-  return typeof arg === 'number';
-}
-exports.isNumber = isNumber;
-
-function isString(arg) {
-  return typeof arg === 'string';
-}
-exports.isString = isString;
-
-function isSymbol(arg) {
-  return typeof arg === 'symbol';
-}
-exports.isSymbol = isSymbol;
-
-function isUndefined(arg) {
-  return arg === void 0;
-}
-exports.isUndefined = isUndefined;
-
-function isRegExp(re) {
-  return objectToString(re) === '[object RegExp]';
-}
-exports.isRegExp = isRegExp;
-
-function isObject(arg) {
-  return typeof arg === 'object' && arg !== null;
-}
-exports.isObject = isObject;
-
-function isDate(d) {
-  return objectToString(d) === '[object Date]';
-}
-exports.isDate = isDate;
-
-function isError(e) {
-  return (objectToString(e) === '[object Error]' || e instanceof Error);
-}
-exports.isError = isError;
-
-function isFunction(arg) {
-  return typeof arg === 'function';
-}
-exports.isFunction = isFunction;
-
-function isPrimitive(arg) {
-  return arg === null ||
-         typeof arg === 'boolean' ||
-         typeof arg === 'number' ||
-         typeof arg === 'string' ||
-         typeof arg === 'symbol' ||  // ES6 symbol
-         typeof arg === 'undefined';
-}
-exports.isPrimitive = isPrimitive;
-
-exports.isBuffer = Buffer.isBuffer;
-
-function objectToString(o) {
-  return Object.prototype.toString.call(o);
-}
-
-/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0).Buffer))
-
-/***/ }),
-/* 30 */
-/***/ (function(module, exports, __webpack_require__) {
-
-/* WEBPACK VAR INJECTION */(function(global, process) {// Copyright Joyent, Inc. and other Node contributors.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a
-// copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to permit
-// persons to whom the Software is furnished to do so, subject to the
-// following conditions:
-//
-// The above copyright notice and this permission notice shall be included
-// in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
-// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-// USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-var formatRegExp = /%[sdj%]/g;
-exports.format = function(f) {
-  if (!isString(f)) {
-    var objects = [];
-    for (var i = 0; i < arguments.length; i++) {
-      objects.push(inspect(arguments[i]));
-    }
-    return objects.join(' ');
-  }
-
-  var i = 1;
-  var args = arguments;
-  var len = args.length;
-  var str = String(f).replace(formatRegExp, function(x) {
-    if (x === '%%') return '%';
-    if (i >= len) return x;
-    switch (x) {
-      case '%s': return String(args[i++]);
-      case '%d': return Number(args[i++]);
-      case '%j':
-        try {
-          return JSON.stringify(args[i++]);
-        } catch (_) {
-          return '[Circular]';
-        }
-      default:
-        return x;
-    }
-  });
-  for (var x = args[i]; i < len; x = args[++i]) {
-    if (isNull(x) || !isObject(x)) {
-      str += ' ' + x;
-    } else {
-      str += ' ' + inspect(x);
-    }
-  }
-  return str;
-};
-
-
-// Mark that a method should not be used.
-// Returns a modified function which warns once by default.
-// If --no-deprecation is set, then it is a no-op.
-exports.deprecate = function(fn, msg) {
-  // Allow for deprecating things in the process of starting up.
-  if (isUndefined(global.process)) {
-    return function() {
-      return exports.deprecate(fn, msg).apply(this, arguments);
-    };
-  }
-
-  if (process.noDeprecation === true) {
-    return fn;
-  }
-
-  var warned = false;
-  function deprecated() {
-    if (!warned) {
-      if (process.throwDeprecation) {
-        throw new Error(msg);
-      } else if (process.traceDeprecation) {
-        console.trace(msg);
-      } else {
-        console.error(msg);
-      }
-      warned = true;
-    }
-    return fn.apply(this, arguments);
-  }
-
-  return deprecated;
-};
-
-
-var debugs = {};
-var debugEnviron;
-exports.debuglog = function(set) {
-  if (isUndefined(debugEnviron))
-    debugEnviron = process.env.NODE_DEBUG || '';
-  set = set.toUpperCase();
-  if (!debugs[set]) {
-    if (new RegExp('\\b' + set + '\\b', 'i').test(debugEnviron)) {
-      var pid = process.pid;
-      debugs[set] = function() {
-        var msg = exports.format.apply(exports, arguments);
-        console.error('%s %d: %s', set, pid, msg);
-      };
-    } else {
-      debugs[set] = function() {};
-    }
-  }
-  return debugs[set];
-};
-
-
-/**
- * Echos the value of a value. Trys to print the value out
- * in the best way possible given the different types.
- *
- * @param {Object} obj The object to print out.
- * @param {Object} opts Optional options object that alters the output.
- */
-/* legacy: obj, showHidden, depth, colors*/
-function inspect(obj, opts) {
-  // default options
-  var ctx = {
-    seen: [],
-    stylize: stylizeNoColor
-  };
-  // legacy...
-  if (arguments.length >= 3) ctx.depth = arguments[2];
-  if (arguments.length >= 4) ctx.colors = arguments[3];
-  if (isBoolean(opts)) {
-    // legacy...
-    ctx.showHidden = opts;
-  } else if (opts) {
-    // got an "options" object
-    exports._extend(ctx, opts);
-  }
-  // set default options
-  if (isUndefined(ctx.showHidden)) ctx.showHidden = false;
-  if (isUndefined(ctx.depth)) ctx.depth = 2;
-  if (isUndefined(ctx.colors)) ctx.colors = false;
-  if (isUndefined(ctx.customInspect)) ctx.customInspect = true;
-  if (ctx.colors) ctx.stylize = stylizeWithColor;
-  return formatValue(ctx, obj, ctx.depth);
-}
-exports.inspect = inspect;
-
-
-// http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
-inspect.colors = {
-  'bold' : [1, 22],
-  'italic' : [3, 23],
-  'underline' : [4, 24],
-  'inverse' : [7, 27],
-  'white' : [37, 39],
-  'grey' : [90, 39],
-  'black' : [30, 39],
-  'blue' : [34, 39],
-  'cyan' : [36, 39],
-  'green' : [32, 39],
-  'magenta' : [35, 39],
-  'red' : [31, 39],
-  'yellow' : [33, 39]
-};
-
-// Don't use 'blue' not visible on cmd.exe
-inspect.styles = {
-  'special': 'cyan',
-  'number': 'yellow',
-  'boolean': 'yellow',
-  'undefined': 'grey',
-  'null': 'bold',
-  'string': 'green',
-  'date': 'magenta',
-  // "name": intentionally not styling
-  'regexp': 'red'
-};
-
-
-function stylizeWithColor(str, styleType) {
-  var style = inspect.styles[styleType];
-
-  if (style) {
-    return '\u001b[' + inspect.colors[style][0] + 'm' + str +
-           '\u001b[' + inspect.colors[style][1] + 'm';
-  } else {
-    return str;
-  }
-}
-
-
-function stylizeNoColor(str, styleType) {
-  return str;
-}
-
-
-function arrayToHash(array) {
-  var hash = {};
-
-  array.forEach(function(val, idx) {
-    hash[val] = true;
-  });
-
-  return hash;
-}
-
-
-function formatValue(ctx, value, recurseTimes) {
-  // Provide a hook for user-specified inspect functions.
-  // Check that value is an object with an inspect function on it
-  if (ctx.customInspect &&
-      value &&
-      isFunction(value.inspect) &&
-      // Filter out the util module, it's inspect function is special
-      value.inspect !== exports.inspect &&
-      // Also filter out any prototype objects using the circular check.
-      !(value.constructor && value.constructor.prototype === value)) {
-    var ret = value.inspect(recurseTimes, ctx);
-    if (!isString(ret)) {
-      ret = formatValue(ctx, ret, recurseTimes);
-    }
-    return ret;
-  }
-
-  // Primitive types cannot have properties
-  var primitive = formatPrimitive(ctx, value);
-  if (primitive) {
-    return primitive;
-  }
-
-  // Look up the keys of the object.
-  var keys = Object.keys(value);
-  var visibleKeys = arrayToHash(keys);
-
-  if (ctx.showHidden) {
-    keys = Object.getOwnPropertyNames(value);
-  }
-
-  // IE doesn't make error fields non-enumerable
-  // http://msdn.microsoft.com/en-us/library/ie/dww52sbt(v=vs.94).aspx
-  if (isError(value)
-      && (keys.indexOf('message') >= 0 || keys.indexOf('description') >= 0)) {
-    return formatError(value);
-  }
-
-  // Some type of object without properties can be shortcutted.
-  if (keys.length === 0) {
-    if (isFunction(value)) {
-      var name = value.name ? ': ' + value.name : '';
-      return ctx.stylize('[Function' + name + ']', 'special');
-    }
-    if (isRegExp(value)) {
-      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
-    }
-    if (isDate(value)) {
-      return ctx.stylize(Date.prototype.toString.call(value), 'date');
-    }
-    if (isError(value)) {
-      return formatError(value);
-    }
-  }
-
-  var base = '', array = false, braces = ['{', '}'];
-
-  // Make Array say that they are Array
-  if (isArray(value)) {
-    array = true;
-    braces = ['[', ']'];
-  }
-
-  // Make functions say that they are functions
-  if (isFunction(value)) {
-    var n = value.name ? ': ' + value.name : '';
-    base = ' [Function' + n + ']';
-  }
-
-  // Make RegExps say that they are RegExps
-  if (isRegExp(value)) {
-    base = ' ' + RegExp.prototype.toString.call(value);
-  }
-
-  // Make dates with properties first say the date
-  if (isDate(value)) {
-    base = ' ' + Date.prototype.toUTCString.call(value);
-  }
-
-  // Make error with message first say the error
-  if (isError(value)) {
-    base = ' ' + formatError(value);
-  }
-
-  if (keys.length === 0 && (!array || value.length == 0)) {
-    return braces[0] + base + braces[1];
-  }
-
-  if (recurseTimes < 0) {
-    if (isRegExp(value)) {
-      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
-    } else {
-      return ctx.stylize('[Object]', 'special');
-    }
-  }
-
-  ctx.seen.push(value);
-
-  var output;
-  if (array) {
-    output = formatArray(ctx, value, recurseTimes, visibleKeys, keys);
-  } else {
-    output = keys.map(function(key) {
-      return formatProperty(ctx, value, recurseTimes, visibleKeys, key, array);
-    });
-  }
-
-  ctx.seen.pop();
-
-  return reduceToSingleString(output, base, braces);
-}
-
-
-function formatPrimitive(ctx, value) {
-  if (isUndefined(value))
-    return ctx.stylize('undefined', 'undefined');
-  if (isString(value)) {
-    var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
-                                             .replace(/'/g, "\\'")
-                                             .replace(/\\"/g, '"') + '\'';
-    return ctx.stylize(simple, 'string');
-  }
-  if (isNumber(value))
-    return ctx.stylize('' + value, 'number');
-  if (isBoolean(value))
-    return ctx.stylize('' + value, 'boolean');
-  // For some reason typeof null is "object", so special case here.
-  if (isNull(value))
-    return ctx.stylize('null', 'null');
-}
-
-
-function formatError(value) {
-  return '[' + Error.prototype.toString.call(value) + ']';
-}
-
-
-function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
-  var output = [];
-  for (var i = 0, l = value.length; i < l; ++i) {
-    if (hasOwnProperty(value, String(i))) {
-      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
-          String(i), true));
-    } else {
-      output.push('');
-    }
-  }
-  keys.forEach(function(key) {
-    if (!key.match(/^\d+$/)) {
-      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
-          key, true));
-    }
-  });
-  return output;
-}
-
-
-function formatProperty(ctx, value, recurseTimes, visibleKeys, key, array) {
-  var name, str, desc;
-  desc = Object.getOwnPropertyDescriptor(value, key) || { value: value[key] };
-  if (desc.get) {
-    if (desc.set) {
-      str = ctx.stylize('[Getter/Setter]', 'special');
-    } else {
-      str = ctx.stylize('[Getter]', 'special');
-    }
-  } else {
-    if (desc.set) {
-      str = ctx.stylize('[Setter]', 'special');
-    }
-  }
-  if (!hasOwnProperty(visibleKeys, key)) {
-    name = '[' + key + ']';
-  }
-  if (!str) {
-    if (ctx.seen.indexOf(desc.value) < 0) {
-      if (isNull(recurseTimes)) {
-        str = formatValue(ctx, desc.value, null);
-      } else {
-        str = formatValue(ctx, desc.value, recurseTimes - 1);
-      }
-      if (str.indexOf('\n') > -1) {
-        if (array) {
-          str = str.split('\n').map(function(line) {
-            return '  ' + line;
-          }).join('\n').substr(2);
-        } else {
-          str = '\n' + str.split('\n').map(function(line) {
-            return '   ' + line;
-          }).join('\n');
-        }
-      }
-    } else {
-      str = ctx.stylize('[Circular]', 'special');
-    }
-  }
-  if (isUndefined(name)) {
-    if (array && key.match(/^\d+$/)) {
-      return str;
-    }
-    name = JSON.stringify('' + key);
-    if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
-      name = name.substr(1, name.length - 2);
-      name = ctx.stylize(name, 'name');
-    } else {
-      name = name.replace(/'/g, "\\'")
-                 .replace(/\\"/g, '"')
-                 .replace(/(^"|"$)/g, "'");
-      name = ctx.stylize(name, 'string');
-    }
-  }
-
-  return name + ': ' + str;
-}
-
-
-function reduceToSingleString(output, base, braces) {
-  var numLinesEst = 0;
-  var length = output.reduce(function(prev, cur) {
-    numLinesEst++;
-    if (cur.indexOf('\n') >= 0) numLinesEst++;
-    return prev + cur.replace(/\u001b\[\d\d?m/g, '').length + 1;
-  }, 0);
-
-  if (length > 60) {
-    return braces[0] +
-           (base === '' ? '' : base + '\n ') +
-           ' ' +
-           output.join(',\n  ') +
-           ' ' +
-           braces[1];
-  }
-
-  return braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
-}
-
-
-// NOTE: These type checking functions intentionally don't use `instanceof`
-// because it is fragile and can be easily faked with `Object.create()`.
-function isArray(ar) {
-  return Array.isArray(ar);
-}
-exports.isArray = isArray;
-
-function isBoolean(arg) {
-  return typeof arg === 'boolean';
-}
-exports.isBoolean = isBoolean;
-
-function isNull(arg) {
-  return arg === null;
-}
-exports.isNull = isNull;
-
-function isNullOrUndefined(arg) {
-  return arg == null;
-}
-exports.isNullOrUndefined = isNullOrUndefined;
-
-function isNumber(arg) {
-  return typeof arg === 'number';
-}
-exports.isNumber = isNumber;
-
-function isString(arg) {
-  return typeof arg === 'string';
-}
-exports.isString = isString;
-
-function isSymbol(arg) {
-  return typeof arg === 'symbol';
-}
-exports.isSymbol = isSymbol;
-
-function isUndefined(arg) {
-  return arg === void 0;
-}
-exports.isUndefined = isUndefined;
-
-function isRegExp(re) {
-  return isObject(re) && objectToString(re) === '[object RegExp]';
-}
-exports.isRegExp = isRegExp;
-
-function isObject(arg) {
-  return typeof arg === 'object' && arg !== null;
-}
-exports.isObject = isObject;
-
-function isDate(d) {
-  return isObject(d) && objectToString(d) === '[object Date]';
-}
-exports.isDate = isDate;
-
-function isError(e) {
-  return isObject(e) &&
-      (objectToString(e) === '[object Error]' || e instanceof Error);
-}
-exports.isError = isError;
-
-function isFunction(arg) {
-  return typeof arg === 'function';
-}
-exports.isFunction = isFunction;
-
-function isPrimitive(arg) {
-  return arg === null ||
-         typeof arg === 'boolean' ||
-         typeof arg === 'number' ||
-         typeof arg === 'string' ||
-         typeof arg === 'symbol' ||  // ES6 symbol
-         typeof arg === 'undefined';
-}
-exports.isPrimitive = isPrimitive;
-
-exports.isBuffer = __webpack_require__(244);
-
-function objectToString(o) {
-  return Object.prototype.toString.call(o);
-}
-
-
-function pad(n) {
-  return n < 10 ? '0' + n.toString(10) : n.toString(10);
-}
-
-
-var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
-              'Oct', 'Nov', 'Dec'];
-
-// 26 Feb 16:19:34
-function timestamp() {
-  var d = new Date();
-  var time = [pad(d.getHours()),
-              pad(d.getMinutes()),
-              pad(d.getSeconds())].join(':');
-  return [d.getDate(), months[d.getMonth()], time].join(' ');
-}
-
-
-// log is just a thin wrapper to console.log that prepends a timestamp
-exports.log = function() {
-  console.log('%s - %s', timestamp(), exports.format.apply(exports, arguments));
-};
-
-
-/**
- * Inherit the prototype methods from one constructor into another.
- *
- * The Function.prototype.inherits from lang.js rewritten as a standalone
- * function (not on Function.prototype). NOTE: If this file is to be loaded
- * during bootstrapping this function needs to be rewritten using some native
- * functions as prototype setup using normal JavaScript does not work as
- * expected during bootstrapping (see mirror.js in r114903).
- *
- * @param {function} ctor Constructor function which needs to inherit the
- *     prototype.
- * @param {function} superCtor Constructor function to inherit prototype from.
- */
-exports.inherits = __webpack_require__(243);
-
-exports._extend = function(origin, add) {
-  // Don't do anything if add isn't an object
-  if (!add || !isObject(add)) return origin;
-
-  var keys = Object.keys(add);
-  var i = keys.length;
-  while (i--) {
-    origin[keys[i]] = add[keys[i]];
-  }
-  return origin;
-};
-
-function hasOwnProperty(obj, prop) {
-  return Object.prototype.hasOwnProperty.call(obj, prop);
-}
-
-/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(11), __webpack_require__(10)))
-
-/***/ }),
-/* 31 */
-/***/ (function(module, exports, __webpack_require__) {
-
-/*
-    This file is part of web3.js.
-
-    web3.js is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    web3.js is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
-*/
-/** 
- * @file sha3.js
- * @author Marek Kotewicz <marek@ethdev.com>
- * @date 2015
- */
-
-var CryptoJS = __webpack_require__(155);
-var sha3 = __webpack_require__(82);
-
-module.exports = function (value, options) {
-    if (options && options.encoding === 'hex') {
-        if (value.length > 2 && value.substr(0, 2) === '0x') {
-            value = value.substr(2);
-        }
-        value = CryptoJS.enc.Hex.parse(value);
-    }
-
-    return sha3(value, {
-        outputLength: 256
-    }).toString();
-};
-
-
-
-/***/ }),
-/* 32 */
-/***/ (function(module, exports) {
-
-/*
-    This file is part of web3.js.
-
-    web3.js is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    web3.js is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
-*/
-/** 
- * @file errors.js
- * @author Marek Kotewicz <marek@ethdev.com>
- * @date 2015
- */
-
-module.exports = {
-    InvalidNumberOfParams: function () {
-        return new Error('Invalid number of input parameters');
-    },
-    InvalidConnection: function (host){
-        return new Error('CONNECTION ERROR: Couldn\'t connect to node '+ host +'.');
-    },
-    InvalidProvider: function () {
-        return new Error('Provider not set or invalid');
-    },
-    InvalidResponse: function (result){
-        var message = !!result && !!result.error && !!result.error.message ? result.error.message : 'Invalid JSON RPC response: ' + JSON.stringify(result);
-        return new Error(message);
-    }
-};
-
-
-
-/***/ }),
-/* 33 */
 /***/ (function(module, exports, __webpack_require__) {
 
 /*
@@ -10890,7 +10116,7 @@ Property.prototype.setRequestManager = function (rm) {
 
 /**
  * Should be called to format input args of method
- * 
+ *
  * @method formatInput
  * @param {Array}
  * @return {Array}
@@ -10907,7 +10133,7 @@ Property.prototype.formatInput = function (arg) {
  * @return {Object}
  */
 Property.prototype.formatOutput = function (result) {
-    return this.outputFormatter && result !== null ? this.outputFormatter(result) : result;
+    return this.outputFormatter && result !== null && result !== undefined ? this.outputFormatter(result) : result;
 };
 
 /**
@@ -10926,7 +10152,7 @@ Property.prototype.extractCallback = function (args) {
 
 /**
  * Should attach function to method
- * 
+ *
  * @method attachToObject
  * @param {Object}
  * @param {Function}
@@ -10934,7 +10160,7 @@ Property.prototype.extractCallback = function (args) {
 Property.prototype.attachToObject = function (obj) {
     var proto = {
         get: this.buildGet(),
-        enumerable: true 
+        enumerable: true
     };
 
     var names = this.name.split('.');
@@ -10958,7 +10184,7 @@ Property.prototype.buildGet = function () {
     return function get() {
         return property.formatOutput(property.requestManager.send({
             method: property.getter
-        })); 
+        }));
     };
 };
 
@@ -10997,7 +10223,7 @@ module.exports = Property;
 
 
 /***/ }),
-/* 34 */
+/* 28 */
 /***/ (function(module, exports, __webpack_require__) {
 
 var __WEBPACK_AMD_DEFINE_RESULT__;/*! bignumber.js v2.0.7 https://github.com/MikeMcl/bignumber.js/LICENCE */
@@ -13684,6 +12910,830 @@ var __WEBPACK_AMD_DEFINE_RESULT__;/*! bignumber.js v2.0.7 https://github.com/Mik
         global.BigNumber = BigNumber;
     }
 })(this);
+
+
+/***/ }),
+/* 29 */
+/***/ (function(module, exports) {
+
+module.exports = {};
+
+/***/ }),
+/* 30 */
+/***/ (function(module, exports, __webpack_require__) {
+
+var anObject       = __webpack_require__(18)
+  , IE8_DOM_DEFINE = __webpack_require__(121)
+  , toPrimitive    = __webpack_require__(142)
+  , dP             = Object.defineProperty;
+
+exports.f = __webpack_require__(19) ? Object.defineProperty : function defineProperty(O, P, Attributes){
+  anObject(O);
+  P = toPrimitive(P, true);
+  anObject(Attributes);
+  if(IE8_DOM_DEFINE)try {
+    return dP(O, P, Attributes);
+  } catch(e){ /* empty */ }
+  if('get' in Attributes || 'set' in Attributes)throw TypeError('Accessors not supported!');
+  if('value' in Attributes)O[P] = Attributes.value;
+  return O;
+};
+
+/***/ }),
+/* 31 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/* WEBPACK VAR INJECTION */(function(Buffer) {// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+// NOTE: These type checking functions intentionally don't use `instanceof`
+// because it is fragile and can be easily faked with `Object.create()`.
+
+function isArray(arg) {
+  if (Array.isArray) {
+    return Array.isArray(arg);
+  }
+  return objectToString(arg) === '[object Array]';
+}
+exports.isArray = isArray;
+
+function isBoolean(arg) {
+  return typeof arg === 'boolean';
+}
+exports.isBoolean = isBoolean;
+
+function isNull(arg) {
+  return arg === null;
+}
+exports.isNull = isNull;
+
+function isNullOrUndefined(arg) {
+  return arg == null;
+}
+exports.isNullOrUndefined = isNullOrUndefined;
+
+function isNumber(arg) {
+  return typeof arg === 'number';
+}
+exports.isNumber = isNumber;
+
+function isString(arg) {
+  return typeof arg === 'string';
+}
+exports.isString = isString;
+
+function isSymbol(arg) {
+  return typeof arg === 'symbol';
+}
+exports.isSymbol = isSymbol;
+
+function isUndefined(arg) {
+  return arg === void 0;
+}
+exports.isUndefined = isUndefined;
+
+function isRegExp(re) {
+  return objectToString(re) === '[object RegExp]';
+}
+exports.isRegExp = isRegExp;
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+exports.isObject = isObject;
+
+function isDate(d) {
+  return objectToString(d) === '[object Date]';
+}
+exports.isDate = isDate;
+
+function isError(e) {
+  return (objectToString(e) === '[object Error]' || e instanceof Error);
+}
+exports.isError = isError;
+
+function isFunction(arg) {
+  return typeof arg === 'function';
+}
+exports.isFunction = isFunction;
+
+function isPrimitive(arg) {
+  return arg === null ||
+         typeof arg === 'boolean' ||
+         typeof arg === 'number' ||
+         typeof arg === 'string' ||
+         typeof arg === 'symbol' ||  // ES6 symbol
+         typeof arg === 'undefined';
+}
+exports.isPrimitive = isPrimitive;
+
+exports.isBuffer = Buffer.isBuffer;
+
+function objectToString(o) {
+  return Object.prototype.toString.call(o);
+}
+
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0).Buffer))
+
+/***/ }),
+/* 32 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/* WEBPACK VAR INJECTION */(function(global, process) {// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+var formatRegExp = /%[sdj%]/g;
+exports.format = function(f) {
+  if (!isString(f)) {
+    var objects = [];
+    for (var i = 0; i < arguments.length; i++) {
+      objects.push(inspect(arguments[i]));
+    }
+    return objects.join(' ');
+  }
+
+  var i = 1;
+  var args = arguments;
+  var len = args.length;
+  var str = String(f).replace(formatRegExp, function(x) {
+    if (x === '%%') return '%';
+    if (i >= len) return x;
+    switch (x) {
+      case '%s': return String(args[i++]);
+      case '%d': return Number(args[i++]);
+      case '%j':
+        try {
+          return JSON.stringify(args[i++]);
+        } catch (_) {
+          return '[Circular]';
+        }
+      default:
+        return x;
+    }
+  });
+  for (var x = args[i]; i < len; x = args[++i]) {
+    if (isNull(x) || !isObject(x)) {
+      str += ' ' + x;
+    } else {
+      str += ' ' + inspect(x);
+    }
+  }
+  return str;
+};
+
+
+// Mark that a method should not be used.
+// Returns a modified function which warns once by default.
+// If --no-deprecation is set, then it is a no-op.
+exports.deprecate = function(fn, msg) {
+  // Allow for deprecating things in the process of starting up.
+  if (isUndefined(global.process)) {
+    return function() {
+      return exports.deprecate(fn, msg).apply(this, arguments);
+    };
+  }
+
+  if (process.noDeprecation === true) {
+    return fn;
+  }
+
+  var warned = false;
+  function deprecated() {
+    if (!warned) {
+      if (process.throwDeprecation) {
+        throw new Error(msg);
+      } else if (process.traceDeprecation) {
+        console.trace(msg);
+      } else {
+        console.error(msg);
+      }
+      warned = true;
+    }
+    return fn.apply(this, arguments);
+  }
+
+  return deprecated;
+};
+
+
+var debugs = {};
+var debugEnviron;
+exports.debuglog = function(set) {
+  if (isUndefined(debugEnviron))
+    debugEnviron = process.env.NODE_DEBUG || '';
+  set = set.toUpperCase();
+  if (!debugs[set]) {
+    if (new RegExp('\\b' + set + '\\b', 'i').test(debugEnviron)) {
+      var pid = process.pid;
+      debugs[set] = function() {
+        var msg = exports.format.apply(exports, arguments);
+        console.error('%s %d: %s', set, pid, msg);
+      };
+    } else {
+      debugs[set] = function() {};
+    }
+  }
+  return debugs[set];
+};
+
+
+/**
+ * Echos the value of a value. Trys to print the value out
+ * in the best way possible given the different types.
+ *
+ * @param {Object} obj The object to print out.
+ * @param {Object} opts Optional options object that alters the output.
+ */
+/* legacy: obj, showHidden, depth, colors*/
+function inspect(obj, opts) {
+  // default options
+  var ctx = {
+    seen: [],
+    stylize: stylizeNoColor
+  };
+  // legacy...
+  if (arguments.length >= 3) ctx.depth = arguments[2];
+  if (arguments.length >= 4) ctx.colors = arguments[3];
+  if (isBoolean(opts)) {
+    // legacy...
+    ctx.showHidden = opts;
+  } else if (opts) {
+    // got an "options" object
+    exports._extend(ctx, opts);
+  }
+  // set default options
+  if (isUndefined(ctx.showHidden)) ctx.showHidden = false;
+  if (isUndefined(ctx.depth)) ctx.depth = 2;
+  if (isUndefined(ctx.colors)) ctx.colors = false;
+  if (isUndefined(ctx.customInspect)) ctx.customInspect = true;
+  if (ctx.colors) ctx.stylize = stylizeWithColor;
+  return formatValue(ctx, obj, ctx.depth);
+}
+exports.inspect = inspect;
+
+
+// http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
+inspect.colors = {
+  'bold' : [1, 22],
+  'italic' : [3, 23],
+  'underline' : [4, 24],
+  'inverse' : [7, 27],
+  'white' : [37, 39],
+  'grey' : [90, 39],
+  'black' : [30, 39],
+  'blue' : [34, 39],
+  'cyan' : [36, 39],
+  'green' : [32, 39],
+  'magenta' : [35, 39],
+  'red' : [31, 39],
+  'yellow' : [33, 39]
+};
+
+// Don't use 'blue' not visible on cmd.exe
+inspect.styles = {
+  'special': 'cyan',
+  'number': 'yellow',
+  'boolean': 'yellow',
+  'undefined': 'grey',
+  'null': 'bold',
+  'string': 'green',
+  'date': 'magenta',
+  // "name": intentionally not styling
+  'regexp': 'red'
+};
+
+
+function stylizeWithColor(str, styleType) {
+  var style = inspect.styles[styleType];
+
+  if (style) {
+    return '\u001b[' + inspect.colors[style][0] + 'm' + str +
+           '\u001b[' + inspect.colors[style][1] + 'm';
+  } else {
+    return str;
+  }
+}
+
+
+function stylizeNoColor(str, styleType) {
+  return str;
+}
+
+
+function arrayToHash(array) {
+  var hash = {};
+
+  array.forEach(function(val, idx) {
+    hash[val] = true;
+  });
+
+  return hash;
+}
+
+
+function formatValue(ctx, value, recurseTimes) {
+  // Provide a hook for user-specified inspect functions.
+  // Check that value is an object with an inspect function on it
+  if (ctx.customInspect &&
+      value &&
+      isFunction(value.inspect) &&
+      // Filter out the util module, it's inspect function is special
+      value.inspect !== exports.inspect &&
+      // Also filter out any prototype objects using the circular check.
+      !(value.constructor && value.constructor.prototype === value)) {
+    var ret = value.inspect(recurseTimes, ctx);
+    if (!isString(ret)) {
+      ret = formatValue(ctx, ret, recurseTimes);
+    }
+    return ret;
+  }
+
+  // Primitive types cannot have properties
+  var primitive = formatPrimitive(ctx, value);
+  if (primitive) {
+    return primitive;
+  }
+
+  // Look up the keys of the object.
+  var keys = Object.keys(value);
+  var visibleKeys = arrayToHash(keys);
+
+  if (ctx.showHidden) {
+    keys = Object.getOwnPropertyNames(value);
+  }
+
+  // IE doesn't make error fields non-enumerable
+  // http://msdn.microsoft.com/en-us/library/ie/dww52sbt(v=vs.94).aspx
+  if (isError(value)
+      && (keys.indexOf('message') >= 0 || keys.indexOf('description') >= 0)) {
+    return formatError(value);
+  }
+
+  // Some type of object without properties can be shortcutted.
+  if (keys.length === 0) {
+    if (isFunction(value)) {
+      var name = value.name ? ': ' + value.name : '';
+      return ctx.stylize('[Function' + name + ']', 'special');
+    }
+    if (isRegExp(value)) {
+      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
+    }
+    if (isDate(value)) {
+      return ctx.stylize(Date.prototype.toString.call(value), 'date');
+    }
+    if (isError(value)) {
+      return formatError(value);
+    }
+  }
+
+  var base = '', array = false, braces = ['{', '}'];
+
+  // Make Array say that they are Array
+  if (isArray(value)) {
+    array = true;
+    braces = ['[', ']'];
+  }
+
+  // Make functions say that they are functions
+  if (isFunction(value)) {
+    var n = value.name ? ': ' + value.name : '';
+    base = ' [Function' + n + ']';
+  }
+
+  // Make RegExps say that they are RegExps
+  if (isRegExp(value)) {
+    base = ' ' + RegExp.prototype.toString.call(value);
+  }
+
+  // Make dates with properties first say the date
+  if (isDate(value)) {
+    base = ' ' + Date.prototype.toUTCString.call(value);
+  }
+
+  // Make error with message first say the error
+  if (isError(value)) {
+    base = ' ' + formatError(value);
+  }
+
+  if (keys.length === 0 && (!array || value.length == 0)) {
+    return braces[0] + base + braces[1];
+  }
+
+  if (recurseTimes < 0) {
+    if (isRegExp(value)) {
+      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
+    } else {
+      return ctx.stylize('[Object]', 'special');
+    }
+  }
+
+  ctx.seen.push(value);
+
+  var output;
+  if (array) {
+    output = formatArray(ctx, value, recurseTimes, visibleKeys, keys);
+  } else {
+    output = keys.map(function(key) {
+      return formatProperty(ctx, value, recurseTimes, visibleKeys, key, array);
+    });
+  }
+
+  ctx.seen.pop();
+
+  return reduceToSingleString(output, base, braces);
+}
+
+
+function formatPrimitive(ctx, value) {
+  if (isUndefined(value))
+    return ctx.stylize('undefined', 'undefined');
+  if (isString(value)) {
+    var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
+                                             .replace(/'/g, "\\'")
+                                             .replace(/\\"/g, '"') + '\'';
+    return ctx.stylize(simple, 'string');
+  }
+  if (isNumber(value))
+    return ctx.stylize('' + value, 'number');
+  if (isBoolean(value))
+    return ctx.stylize('' + value, 'boolean');
+  // For some reason typeof null is "object", so special case here.
+  if (isNull(value))
+    return ctx.stylize('null', 'null');
+}
+
+
+function formatError(value) {
+  return '[' + Error.prototype.toString.call(value) + ']';
+}
+
+
+function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
+  var output = [];
+  for (var i = 0, l = value.length; i < l; ++i) {
+    if (hasOwnProperty(value, String(i))) {
+      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
+          String(i), true));
+    } else {
+      output.push('');
+    }
+  }
+  keys.forEach(function(key) {
+    if (!key.match(/^\d+$/)) {
+      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
+          key, true));
+    }
+  });
+  return output;
+}
+
+
+function formatProperty(ctx, value, recurseTimes, visibleKeys, key, array) {
+  var name, str, desc;
+  desc = Object.getOwnPropertyDescriptor(value, key) || { value: value[key] };
+  if (desc.get) {
+    if (desc.set) {
+      str = ctx.stylize('[Getter/Setter]', 'special');
+    } else {
+      str = ctx.stylize('[Getter]', 'special');
+    }
+  } else {
+    if (desc.set) {
+      str = ctx.stylize('[Setter]', 'special');
+    }
+  }
+  if (!hasOwnProperty(visibleKeys, key)) {
+    name = '[' + key + ']';
+  }
+  if (!str) {
+    if (ctx.seen.indexOf(desc.value) < 0) {
+      if (isNull(recurseTimes)) {
+        str = formatValue(ctx, desc.value, null);
+      } else {
+        str = formatValue(ctx, desc.value, recurseTimes - 1);
+      }
+      if (str.indexOf('\n') > -1) {
+        if (array) {
+          str = str.split('\n').map(function(line) {
+            return '  ' + line;
+          }).join('\n').substr(2);
+        } else {
+          str = '\n' + str.split('\n').map(function(line) {
+            return '   ' + line;
+          }).join('\n');
+        }
+      }
+    } else {
+      str = ctx.stylize('[Circular]', 'special');
+    }
+  }
+  if (isUndefined(name)) {
+    if (array && key.match(/^\d+$/)) {
+      return str;
+    }
+    name = JSON.stringify('' + key);
+    if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
+      name = name.substr(1, name.length - 2);
+      name = ctx.stylize(name, 'name');
+    } else {
+      name = name.replace(/'/g, "\\'")
+                 .replace(/\\"/g, '"')
+                 .replace(/(^"|"$)/g, "'");
+      name = ctx.stylize(name, 'string');
+    }
+  }
+
+  return name + ': ' + str;
+}
+
+
+function reduceToSingleString(output, base, braces) {
+  var numLinesEst = 0;
+  var length = output.reduce(function(prev, cur) {
+    numLinesEst++;
+    if (cur.indexOf('\n') >= 0) numLinesEst++;
+    return prev + cur.replace(/\u001b\[\d\d?m/g, '').length + 1;
+  }, 0);
+
+  if (length > 60) {
+    return braces[0] +
+           (base === '' ? '' : base + '\n ') +
+           ' ' +
+           output.join(',\n  ') +
+           ' ' +
+           braces[1];
+  }
+
+  return braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
+}
+
+
+// NOTE: These type checking functions intentionally don't use `instanceof`
+// because it is fragile and can be easily faked with `Object.create()`.
+function isArray(ar) {
+  return Array.isArray(ar);
+}
+exports.isArray = isArray;
+
+function isBoolean(arg) {
+  return typeof arg === 'boolean';
+}
+exports.isBoolean = isBoolean;
+
+function isNull(arg) {
+  return arg === null;
+}
+exports.isNull = isNull;
+
+function isNullOrUndefined(arg) {
+  return arg == null;
+}
+exports.isNullOrUndefined = isNullOrUndefined;
+
+function isNumber(arg) {
+  return typeof arg === 'number';
+}
+exports.isNumber = isNumber;
+
+function isString(arg) {
+  return typeof arg === 'string';
+}
+exports.isString = isString;
+
+function isSymbol(arg) {
+  return typeof arg === 'symbol';
+}
+exports.isSymbol = isSymbol;
+
+function isUndefined(arg) {
+  return arg === void 0;
+}
+exports.isUndefined = isUndefined;
+
+function isRegExp(re) {
+  return isObject(re) && objectToString(re) === '[object RegExp]';
+}
+exports.isRegExp = isRegExp;
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+exports.isObject = isObject;
+
+function isDate(d) {
+  return isObject(d) && objectToString(d) === '[object Date]';
+}
+exports.isDate = isDate;
+
+function isError(e) {
+  return isObject(e) &&
+      (objectToString(e) === '[object Error]' || e instanceof Error);
+}
+exports.isError = isError;
+
+function isFunction(arg) {
+  return typeof arg === 'function';
+}
+exports.isFunction = isFunction;
+
+function isPrimitive(arg) {
+  return arg === null ||
+         typeof arg === 'boolean' ||
+         typeof arg === 'number' ||
+         typeof arg === 'string' ||
+         typeof arg === 'symbol' ||  // ES6 symbol
+         typeof arg === 'undefined';
+}
+exports.isPrimitive = isPrimitive;
+
+exports.isBuffer = __webpack_require__(244);
+
+function objectToString(o) {
+  return Object.prototype.toString.call(o);
+}
+
+
+function pad(n) {
+  return n < 10 ? '0' + n.toString(10) : n.toString(10);
+}
+
+
+var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
+              'Oct', 'Nov', 'Dec'];
+
+// 26 Feb 16:19:34
+function timestamp() {
+  var d = new Date();
+  var time = [pad(d.getHours()),
+              pad(d.getMinutes()),
+              pad(d.getSeconds())].join(':');
+  return [d.getDate(), months[d.getMonth()], time].join(' ');
+}
+
+
+// log is just a thin wrapper to console.log that prepends a timestamp
+exports.log = function() {
+  console.log('%s - %s', timestamp(), exports.format.apply(exports, arguments));
+};
+
+
+/**
+ * Inherit the prototype methods from one constructor into another.
+ *
+ * The Function.prototype.inherits from lang.js rewritten as a standalone
+ * function (not on Function.prototype). NOTE: If this file is to be loaded
+ * during bootstrapping this function needs to be rewritten using some native
+ * functions as prototype setup using normal JavaScript does not work as
+ * expected during bootstrapping (see mirror.js in r114903).
+ *
+ * @param {function} ctor Constructor function which needs to inherit the
+ *     prototype.
+ * @param {function} superCtor Constructor function to inherit prototype from.
+ */
+exports.inherits = __webpack_require__(243);
+
+exports._extend = function(origin, add) {
+  // Don't do anything if add isn't an object
+  if (!add || !isObject(add)) return origin;
+
+  var keys = Object.keys(add);
+  var i = keys.length;
+  while (i--) {
+    origin[keys[i]] = add[keys[i]];
+  }
+  return origin;
+};
+
+function hasOwnProperty(obj, prop) {
+  return Object.prototype.hasOwnProperty.call(obj, prop);
+}
+
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(11), __webpack_require__(10)))
+
+/***/ }),
+/* 33 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/*
+    This file is part of web3.js.
+
+    web3.js is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    web3.js is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public License
+    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
+*/
+/** 
+ * @file sha3.js
+ * @author Marek Kotewicz <marek@ethdev.com>
+ * @date 2015
+ */
+
+var CryptoJS = __webpack_require__(155);
+var sha3 = __webpack_require__(82);
+
+module.exports = function (value, options) {
+    if (options && options.encoding === 'hex') {
+        if (value.length > 2 && value.substr(0, 2) === '0x') {
+            value = value.substr(2);
+        }
+        value = CryptoJS.enc.Hex.parse(value);
+    }
+
+    return sha3(value, {
+        outputLength: 256
+    }).toString();
+};
+
+
+
+/***/ }),
+/* 34 */
+/***/ (function(module, exports) {
+
+/*
+    This file is part of web3.js.
+
+    web3.js is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    web3.js is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public License
+    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
+*/
+/** 
+ * @file errors.js
+ * @author Marek Kotewicz <marek@ethdev.com>
+ * @date 2015
+ */
+
+module.exports = {
+    InvalidNumberOfParams: function () {
+        return new Error('Invalid number of input parameters');
+    },
+    InvalidConnection: function (host){
+        return new Error('CONNECTION ERROR: Couldn\'t connect to node '+ host +'.');
+    },
+    InvalidProvider: function () {
+        return new Error('Provider not set or invalid');
+    },
+    InvalidResponse: function (result){
+        var message = !!result && !!result.error && !!result.error.message ? result.error.message : 'Invalid JSON RPC response: ' + JSON.stringify(result);
+        return new Error(message);
+    },
+    ConnectionTimeout: function (ms){
+        return new Error('CONNECTION TIMEOUT: timeout of ' + ms + ' ms achived');
+    }
+};
 
 
 /***/ }),
@@ -16852,7 +16902,7 @@ function createPayload(data){
 
 
 /// required to define ETH_BIGNUMBER_ROUNDING_MODE
-var BigNumber = __webpack_require__(34);
+var BigNumber = __webpack_require__(28);
 
 var ETH_UNITS = [
     'wei',
@@ -17032,7 +17082,7 @@ var pollFilter = function(self) {
 
 };
 
-var Filter = function (requestManager, options, methods, formatter, callback) {
+var Filter = function (requestManager, options, methods, formatter, callback, filterCreationErrorCallback) {
     var self = this;
     var implementation = {};
     methods.forEach(function (method) {
@@ -17052,6 +17102,7 @@ var Filter = function (requestManager, options, methods, formatter, callback) {
             self.callbacks.forEach(function(cb){
                 cb(error);
             });
+            filterCreationErrorCallback(error);
         } else {
             self.filterId = id;
 
@@ -17090,11 +17141,15 @@ Filter.prototype.watch = function (callback) {
     return this;
 };
 
-Filter.prototype.stopWatching = function () {
+Filter.prototype.stopWatching = function (callback) {
     this.requestManager.stopPolling(this.filterId);
-    // remove filter async
-    this.implementation.uninstallFilter(this.filterId, function(){});
     this.callbacks = [];
+    // remove filter async
+    if (callback) {
+        this.implementation.uninstallFilter(this.filterId, callback);
+    } else {
+        return this.implementation.uninstallFilter(this.filterId);
+    }
 };
 
 Filter.prototype.get = function (callback) {
@@ -17158,12 +17213,12 @@ module.exports = Filter;
  * @date 2015
  */
 
-var BigNumber = __webpack_require__(34);
+var BigNumber = __webpack_require__(28);
 
 var padLeft = function (string, bytes) {
     var result = string;
     while (result.length < bytes * 2) {
-        result = '00' + result;
+        result = '0' + result;
     }
     return result;
 };
@@ -17391,7 +17446,7 @@ module.exports = Iban;
  * @date 2015
  */
 
-var Method = __webpack_require__(26);
+var Method = __webpack_require__(17);
 
 /// @returns an array of objects describing web3.eth.filter api methods
 var eth = function () {
@@ -22935,7 +22990,7 @@ module.exports = function(it){
 var global    = __webpack_require__(9)
   , core      = __webpack_require__(14)
   , ctx       = __webpack_require__(36)
-  , hide      = __webpack_require__(19)
+  , hide      = __webpack_require__(20)
   , PROTOTYPE = 'prototype';
 
 var $export = function(type, name, source){
@@ -22998,7 +23053,7 @@ module.exports = $export;
 /* 54 */
 /***/ (function(module, exports, __webpack_require__) {
 
-var def = __webpack_require__(28).f
+var def = __webpack_require__(30).f
   , has = __webpack_require__(37)
   , TAG = __webpack_require__(7)('toStringTag');
 
@@ -23446,7 +23501,7 @@ module.exports = Transform;
 var Duplex = __webpack_require__(16);
 
 /*<replacement>*/
-var util = __webpack_require__(29);
+var util = __webpack_require__(31);
 util.inherits = __webpack_require__(2);
 /*</replacement>*/
 
@@ -23608,7 +23663,7 @@ var Duplex;
 Writable.WritableState = WritableState;
 
 /*<replacement>*/
-var util = __webpack_require__(29);
+var util = __webpack_require__(31);
 util.inherits = __webpack_require__(2);
 /*</replacement>*/
 
@@ -23622,9 +23677,9 @@ var internalUtil = {
 var Stream;
 (function () {
   try {
-    Stream = __webpack_require__(25);
+    Stream = __webpack_require__(26);
   } catch (_) {} finally {
-    if (!Stream) Stream = __webpack_require__(23).EventEmitter;
+    if (!Stream) Stream = __webpack_require__(24).EventEmitter;
   }
 })();
 /*</replacement>*/
@@ -24444,7 +24499,7 @@ exports.clearImmediate = clearImmediate;
     You should have received a copy of the GNU Lesser General Public License
     along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
 */
-/** 
+/**
  * @file coder.js
  * @author Marek Kotewicz <marek@ethdev.com>
  * @date 2015
@@ -24462,6 +24517,11 @@ var SolidityTypeReal = __webpack_require__(254);
 var SolidityTypeUReal = __webpack_require__(257);
 var SolidityTypeBytes = __webpack_require__(251);
 
+var isDynamic = function (solidityType, type) {
+   return solidityType.isDynamicType(type) ||
+          solidityType.isDynamicArray(type);
+};
+
 /**
  * SolidityCoder prototype should be used to encode/decode solidity params of any type
  */
@@ -24474,7 +24534,7 @@ var SolidityCoder = function (types) {
  *
  * @method _requireType
  * @param {String} type
- * @returns {SolidityType} 
+ * @returns {SolidityType}
  * @throws {Error} throws if no matching type is found
  */
 SolidityCoder.prototype._requireType = function (type) {
@@ -24519,10 +24579,13 @@ SolidityCoder.prototype.encodeParams = function (types, params) {
     var dynamicOffset = solidityTypes.reduce(function (acc, solidityType, index) {
         var staticPartLength = solidityType.staticPartLength(types[index]);
         var roundedStaticPartLength = Math.floor((staticPartLength + 31) / 32) * 32;
-        return acc + roundedStaticPartLength;
+
+        return acc + (isDynamic(solidityTypes[index], types[index]) ?
+            32 :
+            roundedStaticPartLength);
     }, 0);
 
-    var result = this.encodeMultiWithOffset(types, solidityTypes, encodeds, dynamicOffset); 
+    var result = this.encodeMultiWithOffset(types, solidityTypes, encodeds, dynamicOffset);
 
     return result;
 };
@@ -24531,12 +24594,8 @@ SolidityCoder.prototype.encodeMultiWithOffset = function (types, solidityTypes, 
     var result = "";
     var self = this;
 
-    var isDynamic = function (i) {
-       return solidityTypes[i].isDynamicArray(types[i]) || solidityTypes[i].isDynamicType(types[i]);
-    };
-
     types.forEach(function (type, i) {
-        if (isDynamic(i)) {
+        if (isDynamic(solidityTypes[i], types[i])) {
             result += f.formatInputInt(dynamicOffset).encode();
             var e = self.encodeWithOffset(types[i], solidityTypes[i], encodeds[i], dynamicOffset);
             dynamicOffset += e.length / 2;
@@ -24547,9 +24606,9 @@ SolidityCoder.prototype.encodeMultiWithOffset = function (types, solidityTypes, 
 
         // TODO: figure out nested arrays
     });
-    
+
     types.forEach(function (type, i) {
-        if (isDynamic(i)) {
+        if (isDynamic(solidityTypes[i], types[i])) {
             var e = self.encodeWithOffset(types[i], solidityTypes[i], encodeds[i], dynamicOffset);
             dynamicOffset += e.length / 2;
             result += e;
@@ -24567,7 +24626,7 @@ SolidityCoder.prototype.encodeWithOffset = function (type, solidityType, encoded
             var nestedName = solidityType.nestedName(type);
             var nestedStaticPartLength = solidityType.staticPartLength(nestedName);
             var result = encoded[0];
-            
+
             (function () {
                 var previousLength = 2; // in int
                 if (solidityType.isDynamicArray(nestedName)) {
@@ -24577,7 +24636,7 @@ SolidityCoder.prototype.encodeWithOffset = function (type, solidityType, encoded
                     }
                 }
             })();
-            
+
             // first element is length, skip it
             (function () {
                 for (var i = 0; i < encoded.length - 1; i++) {
@@ -24588,7 +24647,7 @@ SolidityCoder.prototype.encodeWithOffset = function (type, solidityType, encoded
 
             return result;
         })();
-       
+
     } else if (solidityType.isStaticArray(type)) {
         return (function () {
             var nestedName = solidityType.nestedName(type);
@@ -24601,7 +24660,7 @@ SolidityCoder.prototype.encodeWithOffset = function (type, solidityType, encoded
                     var previousLength = 0; // in int
                     for (var i = 0; i < encoded.length; i++) {
                         // calculate length of previous item
-                        previousLength += +(encoded[i - 1] || [])[0] || 0; 
+                        previousLength += +(encoded[i - 1] || [])[0] || 0;
                         result += f.formatInputInt(offset + i * nestedStaticPartLength + previousLength * 32).encode();
                     }
                 })();
@@ -24644,7 +24703,7 @@ SolidityCoder.prototype.decodeParam = function (type, bytes) {
 SolidityCoder.prototype.decodeParams = function (types, bytes) {
     var solidityTypes = this.getSolidityTypes(types);
     var offsets = this.getOffsets(types, solidityTypes);
-        
+
     return solidityTypes.map(function (solidityType, index) {
         return solidityType.decode(bytes, offsets[index],  types[index], index);
     });
@@ -24654,16 +24713,16 @@ SolidityCoder.prototype.getOffsets = function (types, solidityTypes) {
     var lengths =  solidityTypes.map(function (solidityType, index) {
         return solidityType.staticPartLength(types[index]);
     });
-    
+
     for (var i = 1; i < lengths.length; i++) {
          // sum with length of previous element
-        lengths[i] += lengths[i - 1]; 
+        lengths[i] += lengths[i - 1];
     }
 
     return lengths.map(function (length, index) {
         // remove the current length, so the length is sum of previous elements
         var staticPartLength = solidityTypes[index].staticPartLength(types[index]);
-        return length - staticPartLength; 
+        return length - staticPartLength;
     });
 };
 
@@ -24687,7 +24746,6 @@ var coder = new SolidityCoder([
 ]);
 
 module.exports = coder;
-
 
 
 /***/ }),
@@ -24816,7 +24874,7 @@ function isBuffer(b) {
 // ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-var util = __webpack_require__(30);
+var util = __webpack_require__(32);
 var hasOwn = Object.prototype.hasOwnProperty;
 var pSlice = Array.prototype.slice;
 var functionsHaveNames = (function () {
@@ -25305,9 +25363,9 @@ module.exports = __webpack_require__(9).document && document.documentElement;
 var LIBRARY        = __webpack_require__(74)
   , $export        = __webpack_require__(53)
   , redefine       = __webpack_require__(136)
-  , hide           = __webpack_require__(19)
+  , hide           = __webpack_require__(20)
   , has            = __webpack_require__(37)
-  , Iterators      = __webpack_require__(27)
+  , Iterators      = __webpack_require__(29)
   , $iterCreate    = __webpack_require__(126)
   , setToStringTag = __webpack_require__(54)
   , getPrototypeOf = __webpack_require__(132)
@@ -26708,7 +26766,7 @@ module.exports = PassThrough;
 var Transform = __webpack_require__(61);
 
 /*<replacement>*/
-var util = __webpack_require__(29);
+var util = __webpack_require__(31);
 util.inherits = __webpack_require__(2);
 /*</replacement>*/
 
@@ -26748,7 +26806,7 @@ var Duplex;
 Readable.ReadableState = ReadableState;
 
 /*<replacement>*/
-var EE = __webpack_require__(23).EventEmitter;
+var EE = __webpack_require__(24).EventEmitter;
 
 var EElistenerCount = function (emitter, type) {
   return emitter.listeners(type).length;
@@ -26759,9 +26817,9 @@ var EElistenerCount = function (emitter, type) {
 var Stream;
 (function () {
   try {
-    Stream = __webpack_require__(25);
+    Stream = __webpack_require__(26);
   } catch (_) {} finally {
-    if (!Stream) Stream = __webpack_require__(23).EventEmitter;
+    if (!Stream) Stream = __webpack_require__(24).EventEmitter;
   }
 })();
 /*</replacement>*/
@@ -26772,12 +26830,12 @@ var bufferShim = __webpack_require__(49);
 /*</replacement>*/
 
 /*<replacement>*/
-var util = __webpack_require__(29);
+var util = __webpack_require__(31);
 util.inherits = __webpack_require__(2);
 /*</replacement>*/
 
 /*<replacement>*/
-var debugUtil = __webpack_require__(279);
+var debugUtil = __webpack_require__(281);
 var debug = void 0;
 if (debugUtil && debugUtil.debuglog) {
   debug = debugUtil.debuglog('stream');
@@ -27685,7 +27743,7 @@ function indexOf(xs, x) {
  */
 
 var inherits = __webpack_require__(2)
-var Hash = __webpack_require__(24)
+var Hash = __webpack_require__(25)
 
 var K = [
   0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
@@ -27818,7 +27876,7 @@ module.exports = Sha256
 /***/ (function(module, exports, __webpack_require__) {
 
 /* WEBPACK VAR INJECTION */(function(Buffer) {var inherits = __webpack_require__(2)
-var Hash = __webpack_require__(24)
+var Hash = __webpack_require__(25)
 
 var K = [
   0x428a2f98, 0xd728ae22, 0x71374491, 0x23ef65cd,
@@ -28298,7 +28356,7 @@ module.exports = SolidityParam;
 var utils = __webpack_require__(4);
 var coder = __webpack_require__(65);
 var formatters = __webpack_require__(13);
-var sha3 = __webpack_require__(31);
+var sha3 = __webpack_require__(33);
 var Filter = __webpack_require__(45);
 var watches = __webpack_require__(47);
 
@@ -28506,25 +28564,13 @@ module.exports = SolidityEvent;
 /** @file jsonrpc.js
  * @authors:
  *   Marek Kotewicz <marek@ethdev.com>
+ *   Aaron Kumavis <aaron@kumavis.me>
  * @date 2015
  */
 
-var Jsonrpc = function () {
-    // singleton pattern
-    if (arguments.callee._singletonInstance) {
-        return arguments.callee._singletonInstance;
-    }
-    arguments.callee._singletonInstance = this;
-
-    this.messageId = 1;
-};
-
-/**
- * @return {Jsonrpc} singleton
- */
-Jsonrpc.getInstance = function () {
-    var instance = new Jsonrpc();
-    return instance;
+// Initialize Jsonrpc as a simple object with utility functions.
+var Jsonrpc = {
+    messageId: 0
 };
 
 /**
@@ -28535,15 +28581,18 @@ Jsonrpc.getInstance = function () {
  * @param {Array} params, an array of method params, optional
  * @returns {Object} valid jsonrpc payload object
  */
-Jsonrpc.prototype.toPayload = function (method, params) {
+Jsonrpc.toPayload = function (method, params) {
     if (!method)
         console.error('jsonrpc method should be specified!');
 
+    // advance message ID
+    Jsonrpc.messageId++;
+
     return {
         jsonrpc: '2.0',
+        id: Jsonrpc.messageId,
         method: method,
-        params: params || [],
-        id: this.messageId++
+        params: params || []
     };
 };
 
@@ -28554,12 +28603,16 @@ Jsonrpc.prototype.toPayload = function (method, params) {
  * @param {Object}
  * @returns {Boolean} true if response is valid, otherwise false
  */
-Jsonrpc.prototype.isValidResponse = function (response) {
-    return !!response &&
-        !response.error &&
-        response.jsonrpc === '2.0' &&
-        typeof response.id === 'number' &&
-        response.result !== undefined; // only undefined is not valid json object
+Jsonrpc.isValidResponse = function (response) {
+    return Array.isArray(response) ? response.every(validateSingleMessage) : validateSingleMessage(response);
+
+    function validateSingleMessage(message){
+      return !!message &&
+        !message.error &&
+        message.jsonrpc === '2.0' &&
+        typeof message.id === 'number' &&
+        message.result !== undefined; // only undefined is not valid json object
+    }
 };
 
 /**
@@ -28569,10 +28622,9 @@ Jsonrpc.prototype.isValidResponse = function (response) {
  * @param {Array} messages, an array of objects with method (required) and params (optional) fields
  * @returns {Array} batch payload
  */
-Jsonrpc.prototype.toBatchPayload = function (messages) {
-    var self = this;
+Jsonrpc.toBatchPayload = function (messages) {
     return messages.map(function (message) {
-        return self.toPayload(message.method, message.params);
+        return Jsonrpc.toPayload(message.method, message.params);
     });
 };
 
@@ -28863,8 +28915,8 @@ module.exports = LedgerWallet;
 /* 100 */
 /***/ (function(module, exports, __webpack_require__) {
 
-const EventEmitter = __webpack_require__(23).EventEmitter
-const inherits = __webpack_require__(30).inherits
+const EventEmitter = __webpack_require__(24).EventEmitter
+const inherits = __webpack_require__(32).inherits
 const Stoplight = __webpack_require__(248)
 const cacheUtils = __webpack_require__(247)
 const createPayload = __webpack_require__(43)
@@ -29138,7 +29190,7 @@ function SourceNotFoundError(payload){
  */
 
 const async = __webpack_require__(48)
-const inherits = __webpack_require__(30).inherits
+const inherits = __webpack_require__(32).inherits
 const ethUtil = __webpack_require__(41)
 const sigUtil = __webpack_require__(188)
 const extend = __webpack_require__(67)
@@ -29229,6 +29281,14 @@ HookedWalletSubprovider.prototype.handleRequest = function(payload, next, end){
       ], end)
       return
 
+    case 'eth_signTransaction':
+      var txParams = payload.params[0]
+      async.waterfall([
+        (cb) => self.validateTransaction(txParams, cb),
+        (cb) => self.processSignTransaction(txParams, cb),
+      ], end)
+      return
+
     case 'eth_sign':
       var address = payload.params[0]
       var message = payload.params[1]
@@ -29291,6 +29351,16 @@ HookedWalletSubprovider.prototype.processTransaction = function(txParams, cb) {
     (cb) => self.approveTransaction(txParams, cb),
     (didApprove, cb) => self.checkApproval('transaction', didApprove, cb),
     (cb) => self.finalizeAndSubmitTx(txParams, cb),
+  ], cb)
+}
+
+
+HookedWalletSubprovider.prototype.processSignTransaction = function(txParams, cb) {
+  const self = this
+  async.waterfall([
+    (cb) => self.approveTransaction(txParams, cb),
+    (didApprove, cb) => self.checkApproval('transaction', didApprove, cb),
+    (cb) => self.finalizeTx(txParams, cb),
   ], cb)
 }
 
@@ -29417,6 +29487,22 @@ HookedWalletSubprovider.prototype.finalizeAndSubmitTx = function(txParams, cb) {
   })
 }
 
+HookedWalletSubprovider.prototype.finalizeTx = function(txParams, cb) {
+  const self = this
+  // can only allow one tx to pass through this flow at a time
+  // so we can atomically consume a nonce
+  self.nonceLock.take(function(){
+    async.waterfall([
+      self.fillInTxExtras.bind(self, txParams),
+      self.signTransaction.bind(self),
+    ], function(err, signedTx){
+      self.nonceLock.leave()
+      if (err) return cb(err)
+      cb(null, {raw: signedTx, tx: txParams})
+    })
+  })
+}
+
 HookedWalletSubprovider.prototype.publishTransaction = function(rawTx, cb) {
   const self = this
   self.emitPayload({
@@ -29492,12 +29578,13 @@ function isValidHex(data) {
   return isValid
 }
 
+
 /***/ }),
 /* 102 */
 /***/ (function(module, exports, __webpack_require__) {
 
-/* WEBPACK VAR INJECTION */(function(process, global) {const xhr = (process.browser || global.XMLHttpRequest) ? __webpack_require__(277) : __webpack_require__(280)
-const inherits = __webpack_require__(30).inherits
+/* WEBPACK VAR INJECTION */(function(process, global) {const xhr = (process.browser || global.XMLHttpRequest) ? __webpack_require__(278) : __webpack_require__(282)
+const inherits = __webpack_require__(32).inherits
 const createPayload = __webpack_require__(43)
 const Subprovider = __webpack_require__(95)
 const JsonRpcError = __webpack_require__(206)
@@ -30672,7 +30759,7 @@ if (typeof self === 'object') {
 } else {
   // Node.js or Web worker with no crypto support
   try {
-    var crypto = __webpack_require__(278);
+    var crypto = __webpack_require__(280);
     if (typeof crypto.randomBytes !== 'function')
       throw new Error('Not supported');
 
@@ -30688,7 +30775,7 @@ if (typeof self === 'object') {
 /* 113 */
 /***/ (function(module, exports, __webpack_require__) {
 
-/* WEBPACK VAR INJECTION */(function(Buffer) {var Transform = __webpack_require__(25).Transform
+/* WEBPACK VAR INJECTION */(function(Buffer) {var Transform = __webpack_require__(26).Transform
 var inherits = __webpack_require__(2)
 var StringDecoder = __webpack_require__(63).StringDecoder
 module.exports = CipherBase
@@ -30860,7 +30947,7 @@ module.exports = function(IS_INCLUDES){
 var ctx         = __webpack_require__(36)
   , call        = __webpack_require__(125)
   , isArrayIter = __webpack_require__(124)
-  , anObject    = __webpack_require__(17)
+  , anObject    = __webpack_require__(18)
   , toLength    = __webpack_require__(78)
   , getIterFn   = __webpack_require__(143)
   , BREAK       = {}
@@ -30887,7 +30974,7 @@ exports.RETURN = RETURN;
 /* 121 */
 /***/ (function(module, exports, __webpack_require__) {
 
-module.exports = !__webpack_require__(18) && !__webpack_require__(71)(function(){
+module.exports = !__webpack_require__(19) && !__webpack_require__(71)(function(){
   return Object.defineProperty(__webpack_require__(52)('div'), 'a', {get: function(){ return 7; }}).a != 7;
 });
 
@@ -30927,7 +31014,7 @@ module.exports = Object('z').propertyIsEnumerable(0) ? Object : function(it){
 /***/ (function(module, exports, __webpack_require__) {
 
 // check on default Array iterator
-var Iterators  = __webpack_require__(27)
+var Iterators  = __webpack_require__(29)
   , ITERATOR   = __webpack_require__(7)('iterator')
   , ArrayProto = Array.prototype;
 
@@ -30940,7 +31027,7 @@ module.exports = function(it){
 /***/ (function(module, exports, __webpack_require__) {
 
 // call something on iterator step with safe closing on error
-var anObject = __webpack_require__(17);
+var anObject = __webpack_require__(18);
 module.exports = function(iterator, fn, value, entries){
   try {
     return entries ? fn(anObject(value)[0], value[1]) : fn(value);
@@ -30964,7 +31051,7 @@ var create         = __webpack_require__(130)
   , IteratorPrototype = {};
 
 // 25.1.2.1.1 %IteratorPrototype%[@@iterator]()
-__webpack_require__(19)(IteratorPrototype, __webpack_require__(7)('iterator'), function(){ return this; });
+__webpack_require__(20)(IteratorPrototype, __webpack_require__(7)('iterator'), function(){ return this; });
 
 module.exports = function(Constructor, NAME, next){
   Constructor.prototype = create(IteratorPrototype, {next: descriptor(1, next)});
@@ -31083,7 +31170,7 @@ module.exports = function(){
 /***/ (function(module, exports, __webpack_require__) {
 
 // 19.1.2.2 / 15.2.3.5 Object.create(O [, Properties])
-var anObject    = __webpack_require__(17)
+var anObject    = __webpack_require__(18)
   , dPs         = __webpack_require__(131)
   , enumBugKeys = __webpack_require__(70)
   , IE_PROTO    = __webpack_require__(55)('IE_PROTO')
@@ -31129,11 +31216,11 @@ module.exports = Object.create || function create(O, Properties){
 /* 131 */
 /***/ (function(module, exports, __webpack_require__) {
 
-var dP       = __webpack_require__(28)
-  , anObject = __webpack_require__(17)
+var dP       = __webpack_require__(30)
+  , anObject = __webpack_require__(18)
   , getKeys  = __webpack_require__(134);
 
-module.exports = __webpack_require__(18) ? Object.defineProperties : function defineProperties(O, Properties){
+module.exports = __webpack_require__(19) ? Object.defineProperties : function defineProperties(O, Properties){
   anObject(O);
   var keys   = getKeys(Properties)
     , length = keys.length
@@ -31199,7 +31286,7 @@ module.exports = Object.keys || function keys(O){
 /* 135 */
 /***/ (function(module, exports, __webpack_require__) {
 
-var hide = __webpack_require__(19);
+var hide = __webpack_require__(20);
 module.exports = function(target, src, safe){
   for(var key in src){
     if(safe && target[key])target[key] = src[key];
@@ -31211,7 +31298,7 @@ module.exports = function(target, src, safe){
 /* 136 */
 /***/ (function(module, exports, __webpack_require__) {
 
-module.exports = __webpack_require__(19);
+module.exports = __webpack_require__(20);
 
 /***/ }),
 /* 137 */
@@ -31221,8 +31308,8 @@ module.exports = __webpack_require__(19);
 
 var global      = __webpack_require__(9)
   , core        = __webpack_require__(14)
-  , dP          = __webpack_require__(28)
-  , DESCRIPTORS = __webpack_require__(18)
+  , dP          = __webpack_require__(30)
+  , DESCRIPTORS = __webpack_require__(19)
   , SPECIES     = __webpack_require__(7)('species');
 
 module.exports = function(KEY){
@@ -31238,7 +31325,7 @@ module.exports = function(KEY){
 /***/ (function(module, exports, __webpack_require__) {
 
 // 7.3.20 SpeciesConstructor(O, defaultConstructor)
-var anObject  = __webpack_require__(17)
+var anObject  = __webpack_require__(18)
   , aFunction = __webpack_require__(50)
   , SPECIES   = __webpack_require__(7)('species');
 module.exports = function(O, D){
@@ -31313,7 +31400,7 @@ module.exports = function(it, S){
 
 var classof   = __webpack_require__(69)
   , ITERATOR  = __webpack_require__(7)('iterator')
-  , Iterators = __webpack_require__(27);
+  , Iterators = __webpack_require__(29);
 module.exports = __webpack_require__(14).getIteratorMethod = function(it){
   if(it != undefined)return it[ITERATOR]
     || it['@@iterator']
@@ -31328,7 +31415,7 @@ module.exports = __webpack_require__(14).getIteratorMethod = function(it){
 
 var addToUnscopables = __webpack_require__(117)
   , step             = __webpack_require__(128)
-  , Iterators        = __webpack_require__(27)
+  , Iterators        = __webpack_require__(29)
   , toIObject        = __webpack_require__(57);
 
 // 22.1.3.4 Array.prototype.entries()
@@ -31366,7 +31453,7 @@ addToUnscopables('entries');
 
 var $export = __webpack_require__(53);
 // 19.1.2.4 / 15.2.3.6 Object.defineProperty(O, P, Attributes)
-$export($export.S + $export.F * !__webpack_require__(18), 'Object', {defineProperty: __webpack_require__(28).f});
+$export($export.S + $export.F * !__webpack_require__(19), 'Object', {defineProperty: __webpack_require__(30).f});
 
 /***/ }),
 /* 146 */
@@ -31708,8 +31795,8 @@ __webpack_require__(73)(String, 'String', function(iterated){
 
 __webpack_require__(144);
 var global        = __webpack_require__(9)
-  , hide          = __webpack_require__(19)
-  , Iterators     = __webpack_require__(27)
+  , hide          = __webpack_require__(20)
+  , Iterators     = __webpack_require__(29)
   , TO_STRING_TAG = __webpack_require__(7)('toStringTag');
 
 for(var collections = ['NodeList', 'DOMTokenList', 'MediaList', 'StyleSheetList', 'CSSRuleList'], i = 0; i < 5; i++){
@@ -31930,7 +32017,7 @@ module.exports = function md5(buf) {
 ;(function (root, factory, undef) {
 	if (true) {
 		// CommonJS
-		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(20), __webpack_require__(22), __webpack_require__(21), __webpack_require__(3));
+		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(21), __webpack_require__(23), __webpack_require__(22), __webpack_require__(3));
 	}
 	else if (typeof define === "function" && define.amd) {
 		// AMD
@@ -32392,7 +32479,7 @@ module.exports = function md5(buf) {
 ;(function (root, factory, undef) {
 	if (true) {
 		// CommonJS
-		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(39), __webpack_require__(156), __webpack_require__(153), __webpack_require__(20), __webpack_require__(22), __webpack_require__(59), __webpack_require__(81), __webpack_require__(172), __webpack_require__(83), __webpack_require__(173), __webpack_require__(82), __webpack_require__(171), __webpack_require__(58), __webpack_require__(167), __webpack_require__(21), __webpack_require__(3), __webpack_require__(157), __webpack_require__(159), __webpack_require__(158), __webpack_require__(161), __webpack_require__(160), __webpack_require__(162), __webpack_require__(163), __webpack_require__(164), __webpack_require__(166), __webpack_require__(165), __webpack_require__(154), __webpack_require__(152), __webpack_require__(174), __webpack_require__(170), __webpack_require__(169), __webpack_require__(168));
+		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(39), __webpack_require__(156), __webpack_require__(153), __webpack_require__(21), __webpack_require__(23), __webpack_require__(59), __webpack_require__(81), __webpack_require__(172), __webpack_require__(83), __webpack_require__(173), __webpack_require__(82), __webpack_require__(171), __webpack_require__(58), __webpack_require__(167), __webpack_require__(22), __webpack_require__(3), __webpack_require__(157), __webpack_require__(159), __webpack_require__(158), __webpack_require__(161), __webpack_require__(160), __webpack_require__(162), __webpack_require__(163), __webpack_require__(164), __webpack_require__(166), __webpack_require__(165), __webpack_require__(154), __webpack_require__(152), __webpack_require__(174), __webpack_require__(170), __webpack_require__(169), __webpack_require__(168));
 	}
 	else if (typeof define === "function" && define.amd) {
 		// AMD
@@ -33250,7 +33337,7 @@ module.exports = function md5(buf) {
 ;(function (root, factory, undef) {
 	if (true) {
 		// CommonJS
-		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(20), __webpack_require__(22), __webpack_require__(21), __webpack_require__(3));
+		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(21), __webpack_require__(23), __webpack_require__(22), __webpack_require__(3));
 	}
 	else if (typeof define === "function" && define.amd) {
 		// AMD
@@ -33445,7 +33532,7 @@ module.exports = function md5(buf) {
 ;(function (root, factory, undef) {
 	if (true) {
 		// CommonJS
-		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(20), __webpack_require__(22), __webpack_require__(21), __webpack_require__(3));
+		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(21), __webpack_require__(23), __webpack_require__(22), __webpack_require__(3));
 	}
 	else if (typeof define === "function" && define.amd) {
 		// AMD
@@ -33642,7 +33729,7 @@ module.exports = function md5(buf) {
 ;(function (root, factory, undef) {
 	if (true) {
 		// CommonJS
-		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(20), __webpack_require__(22), __webpack_require__(21), __webpack_require__(3));
+		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(21), __webpack_require__(23), __webpack_require__(22), __webpack_require__(3));
 	}
 	else if (typeof define === "function" && define.amd) {
 		// AMD
@@ -34231,7 +34318,7 @@ module.exports = function md5(buf) {
 ;(function (root, factory, undef) {
 	if (true) {
 		// CommonJS
-		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(20), __webpack_require__(22), __webpack_require__(21), __webpack_require__(3));
+		module.exports = exports = factory(__webpack_require__(1), __webpack_require__(21), __webpack_require__(23), __webpack_require__(22), __webpack_require__(3));
 	}
 	else if (typeof define === "function" && define.amd) {
 		// AMD
@@ -41681,6 +41768,7 @@ module.exports = [
 		],
 		"name": "deposit",
 		"outputs": [],
+		"payable": true,
 		"type": "function"
 	},
 	{
@@ -41778,7 +41866,7 @@ module.exports = [
 /***/ (function(module, exports) {
 
 module.exports = {
-	"version": "0.16.0"
+	"version": "0.18.4"
 };
 
 /***/ }),
@@ -41942,7 +42030,7 @@ module.exports = function (KeccakState) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(Buffer) {
-var Transform = __webpack_require__(25).Transform
+var Transform = __webpack_require__(26).Transform
 var inherits = __webpack_require__(2)
 
 module.exports = function (KeccakState) {
@@ -42033,7 +42121,7 @@ module.exports = function (KeccakState) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(Buffer) {
-var Transform = __webpack_require__(25).Transform
+var Transform = __webpack_require__(26).Transform
 var inherits = __webpack_require__(2)
 
 module.exports = function (KeccakState) {
@@ -43557,7 +43645,7 @@ module.exports = __webpack_require__(91)
 
 /* WEBPACK VAR INJECTION */(function(process) {var Stream = (function (){
   try {
-    return __webpack_require__(25); // hack to fix a circular dependency issue when used with browserify
+    return __webpack_require__(26); // hack to fix a circular dependency issue when used with browserify
   } catch(_){}
 }());
 exports = module.exports = __webpack_require__(92);
@@ -45129,7 +45217,7 @@ exports.sha512 = __webpack_require__(94)
  */
 
 var inherits = __webpack_require__(2)
-var Hash = __webpack_require__(24)
+var Hash = __webpack_require__(25)
 
 var K = [
   0x5a827999, 0x6ed9eba1, 0x8f1bbcdc | 0, 0xca62c1d6 | 0
@@ -45230,7 +45318,7 @@ module.exports = Sha
  */
 
 var inherits = __webpack_require__(2)
-var Hash = __webpack_require__(24)
+var Hash = __webpack_require__(25)
 
 var K = [
   0x5a827999, 0x6ed9eba1, 0x8f1bbcdc | 0, 0xca62c1d6 | 0
@@ -45335,7 +45423,7 @@ module.exports = Sha1
 
 var inherits = __webpack_require__(2)
 var Sha256 = __webpack_require__(93)
-var Hash = __webpack_require__(24)
+var Hash = __webpack_require__(25)
 
 var W = new Array(64)
 
@@ -45386,7 +45474,7 @@ module.exports = Sha224
 
 /* WEBPACK VAR INJECTION */(function(Buffer) {var inherits = __webpack_require__(2)
 var SHA512 = __webpack_require__(94)
-var Hash = __webpack_require__(24)
+var Hash = __webpack_require__(25)
 
 var W = new Array(160)
 
@@ -46048,8 +46136,8 @@ function cacheTypeForPayload(payload) {
 /* 248 */
 /***/ (function(module, exports, __webpack_require__) {
 
-const EventEmitter = __webpack_require__(23).EventEmitter
-const inherits = __webpack_require__(30).inherits
+const EventEmitter = __webpack_require__(24).EventEmitter
+const inherits = __webpack_require__(32).inherits
 
 module.exports = Stoplight
 
@@ -46112,12 +46200,7 @@ SolidityTypeAddress.prototype.isType = function (name) {
     return !!name.match(/address(\[([0-9]*)\])?/);
 };
 
-SolidityTypeAddress.prototype.staticPartLength = function (name) {
-    return 32 * this.staticArrayLength(name);
-};
-
 module.exports = SolidityTypeAddress;
-
 
 
 /***/ }),
@@ -46149,10 +46232,6 @@ SolidityTypeBool.prototype.isType = function (name) {
     return !!name.match(/^bool(\[([0-9]*)\])*$/);
 };
 
-SolidityTypeBool.prototype.staticPartLength = function (name) {
-    return 32 * this.staticArrayLength(name);
-};
-
 module.exports = SolidityTypeBool;
 
 
@@ -46164,7 +46243,7 @@ var f = __webpack_require__(8);
 var SolidityType = __webpack_require__(12);
 
 /**
- * SolidityTypeBytes is a prootype that represents bytes type
+ * SolidityTypeBytes is a prototype that represents the bytes type.
  * It matches:
  * bytes
  * bytes[]
@@ -46173,11 +46252,8 @@ var SolidityType = __webpack_require__(12);
  * bytes[3][]
  * bytes[][6][], ...
  * bytes32
- * bytes64[]
  * bytes8[4]
- * bytes256[][]
  * bytes[3][]
- * bytes64[][6][], ...
  */
 var SolidityTypeBytes = function () {
     this._inputFormatter = f.formatInputBytes;
@@ -46189,12 +46265,6 @@ SolidityTypeBytes.prototype.constructor = SolidityTypeBytes;
 
 SolidityTypeBytes.prototype.isType = function (name) {
     return !!name.match(/^bytes([0-9]{1,})(\[([0-9]*)\])*$/);
-};
-
-SolidityTypeBytes.prototype.staticPartLength = function (name) {
-    var matches = name.match(/^bytes([0-9]*)/);
-    var size = parseInt(matches[1]);
-    return size * this.staticArrayLength(name);
 };
 
 module.exports = SolidityTypeBytes;
@@ -46219,16 +46289,11 @@ SolidityTypeDynamicBytes.prototype.isType = function (name) {
     return !!name.match(/^bytes(\[([0-9]*)\])*$/);
 };
 
-SolidityTypeDynamicBytes.prototype.staticPartLength = function (name) {
-    return 32 * this.staticArrayLength(name);
-};
-
 SolidityTypeDynamicBytes.prototype.isDynamicType = function () {
     return true;
 };
 
 module.exports = SolidityTypeDynamicBytes;
-
 
 
 /***/ }),
@@ -46264,10 +46329,6 @@ SolidityTypeInt.prototype.constructor = SolidityTypeInt;
 
 SolidityTypeInt.prototype.isType = function (name) {
     return !!name.match(/^int([0-9]*)?(\[([0-9]*)\])*$/);
-};
-
-SolidityTypeInt.prototype.staticPartLength = function (name) {
-    return 32 * this.staticArrayLength(name);
 };
 
 module.exports = SolidityTypeInt;
@@ -46308,10 +46369,6 @@ SolidityTypeReal.prototype.isType = function (name) {
     return !!name.match(/real([0-9]*)?(\[([0-9]*)\])?/);
 };
 
-SolidityTypeReal.prototype.staticPartLength = function (name) {
-    return 32 * this.staticArrayLength(name);
-};
-
 module.exports = SolidityTypeReal;
 
 
@@ -46334,16 +46391,11 @@ SolidityTypeString.prototype.isType = function (name) {
     return !!name.match(/^string(\[([0-9]*)\])*$/);
 };
 
-SolidityTypeString.prototype.staticPartLength = function (name) {
-    return 32 * this.staticArrayLength(name);
-};
-
 SolidityTypeString.prototype.isDynamicType = function () {
     return true;
 };
 
 module.exports = SolidityTypeString;
-
 
 
 /***/ }),
@@ -46379,10 +46431,6 @@ SolidityTypeUInt.prototype.constructor = SolidityTypeUInt;
 
 SolidityTypeUInt.prototype.isType = function (name) {
     return !!name.match(/^uint([0-9]*)?(\[([0-9]*)\])*$/);
-};
-
-SolidityTypeUInt.prototype.staticPartLength = function (name) {
-    return 32 * this.staticArrayLength(name);
 };
 
 module.exports = SolidityTypeUInt;
@@ -46421,10 +46469,6 @@ SolidityTypeUReal.prototype.constructor = SolidityTypeUReal;
 
 SolidityTypeUReal.prototype.isType = function (name) {
     return !!name.match(/^ureal([0-9]*)?(\[([0-9]*)\])*$/);
-};
-
-SolidityTypeUReal.prototype.staticPartLength = function (name) {
-    return 32 * this.staticArrayLength(name);
 };
 
 module.exports = SolidityTypeUReal;
@@ -46477,22 +46521,24 @@ if (typeof XMLHttpRequest === 'undefined') {
  * @date 2014
  */
 
-var RequestManager = __webpack_require__(273);
+var RequestManager = __webpack_require__(274);
 var Iban = __webpack_require__(46);
 var Eth = __webpack_require__(268);
 var DB = __webpack_require__(267);
 var Shh = __webpack_require__(271);
 var Net = __webpack_require__(269);
 var Personal = __webpack_require__(270);
-var Settings = __webpack_require__(274);
+var Swarm = __webpack_require__(272);
+var Settings = __webpack_require__(275);
 var version = __webpack_require__(205);
 var utils = __webpack_require__(4);
-var sha3 = __webpack_require__(31);
+var sha3 = __webpack_require__(33);
 var extend = __webpack_require__(263);
 var Batch = __webpack_require__(261);
-var Property = __webpack_require__(33);
+var Property = __webpack_require__(27);
 var HttpProvider = __webpack_require__(265);
 var IpcProvider = __webpack_require__(266);
+var BigNumber = __webpack_require__(28);
 
 
 
@@ -46504,6 +46550,7 @@ function Web3 (provider) {
     this.shh = new Shh(this);
     this.net = new Net(this);
     this.personal = new Personal(this);
+    this.bzz = new Swarm(this);
     this.settings = new Settings();
     this.version = {
         api: version.version
@@ -46534,6 +46581,7 @@ Web3.prototype.reset = function (keepIsSyncing) {
     this.settings = new Settings();
 };
 
+Web3.prototype.BigNumber = BigNumber;
 Web3.prototype.toHex = utils.toHex;
 Web3.prototype.toAscii = utils.toAscii;
 Web3.prototype.toUtf8 = utils.toUtf8;
@@ -46624,7 +46672,7 @@ module.exports = Web3;
  * @date 2014
  */
 
-var sha3 = __webpack_require__(31);
+var sha3 = __webpack_require__(33);
 var SolidityEvent = __webpack_require__(97);
 var formatters = __webpack_require__(13);
 var utils = __webpack_require__(4);
@@ -46719,7 +46767,7 @@ module.exports = AllSolidityEvents;
  */
 
 var Jsonrpc = __webpack_require__(98);
-var errors = __webpack_require__(32);
+var errors = __webpack_require__(34);
 
 var Batch = function (web3) {
     this.requestManager = web3._requestManager;
@@ -46750,7 +46798,7 @@ Batch.prototype.execute = function () {
         }).forEach(function (result, index) {
             if (requests[index].callback) {
 
-                if (!Jsonrpc.getInstance().isValidResponse(result)) {
+                if (!Jsonrpc.isValidResponse(result)) {
                     return requests[index].callback(errors.InvalidResponse(result));
                 }
 
@@ -46875,7 +46923,7 @@ var checkForContractAddress = function(contract, callback){
             // stop watching after 50 blocks (timeout)
             if (count > 50) {
 
-                filter.stopWatching();
+                filter.stopWatching(function() {});
                 callbackFired = true;
 
                 if (callback)
@@ -46895,10 +46943,10 @@ var checkForContractAddress = function(contract, callback){
                             if(callbackFired || !code)
                                 return;
 
-                            filter.stopWatching();
+                            filter.stopWatching(function() {});
                             callbackFired = true;
 
-                            if(code.length > 2) {
+                            if(code.length > 3) {
 
                                 // console.log('Contract code deployed!');
 
@@ -46947,6 +46995,8 @@ var ContractFactory = function (eth, abi) {
      * @returns {Contract} returns contract instance
      */
     this.new = function () {
+        /*jshint maxcomplexity: 7 */
+        
         var contract = new Contract(this.eth, this.abi);
 
         // parse arguments
@@ -46961,6 +47011,16 @@ var ContractFactory = function (eth, abi) {
         var last = args[args.length - 1];
         if (utils.isObject(last) && !utils.isArray(last)) {
             options = args.pop();
+        }
+
+        if (options.value > 0) {
+            var constructorAbi = abi.filter(function (json) {
+                return json.type === 'constructor' && json.inputs.length === args.length;
+            })[0] || {};
+
+            if (!constructorAbi.payable) {
+                throw new Error('Cannot send value to non-payable constructor');
+            }
         }
 
         var bytes = encodeConstructorParams(this.abi, args);
@@ -47074,8 +47134,8 @@ module.exports = ContractFactory;
 
 var formatters = __webpack_require__(13);
 var utils = __webpack_require__(4);
-var Method = __webpack_require__(26);
-var Property = __webpack_require__(33);
+var Method = __webpack_require__(17);
+var Property = __webpack_require__(27);
 
 // TODO: refactor, so the input params are not altered.
 // it's necessary to make same 'extension' work with multiple providers
@@ -47151,7 +47211,7 @@ module.exports = extend;
 var coder = __webpack_require__(65);
 var utils = __webpack_require__(4);
 var formatters = __webpack_require__(13);
-var sha3 = __webpack_require__(31);
+var sha3 = __webpack_require__(33);
 
 /**
  * This prototype should be used to call/sendTransaction to solidity functions
@@ -47165,6 +47225,7 @@ var SolidityFunction = function (eth, json, address) {
         return i.type;
     });
     this._constant = json.constant;
+    this._payable = json.payable;
     this._name = utils.transformToFullName(json);
     this._address = address;
 };
@@ -47239,11 +47300,21 @@ SolidityFunction.prototype.call = function () {
     if (!callback) {
         var output = this._eth.call(payload, defaultBlock);
         return this.unpackOutput(output);
-    } 
-        
+    }
+
     var self = this;
     this._eth.call(payload, defaultBlock, function (error, output) {
-        callback(error, self.unpackOutput(output));
+        if (error) return callback(error, null);
+
+        var unpacked = null;
+        try {
+            unpacked = self.unpackOutput(output);
+        }
+        catch (e) {
+            error = e;
+        }
+
+        callback(error, unpacked);
     });
 };
 
@@ -47256,6 +47327,10 @@ SolidityFunction.prototype.sendTransaction = function () {
     var args = Array.prototype.slice.call(arguments).filter(function (a) {return a !== undefined; });
     var callback = this.extractCallback(args);
     var payload = this.toPayload(args);
+
+    if (payload.value > 0 && !this._payable) {
+        throw new Error('Cannot send value to non-payable function');
+    }
 
     if (!callback) {
         return this._eth.sendTransaction(payload);
@@ -47325,11 +47400,11 @@ SolidityFunction.prototype.request = function () {
     var callback = this.extractCallback(args);
     var payload = this.toPayload(args);
     var format = this.unpackOutput.bind(this);
-    
+
     return {
         method: this._constant ? 'eth_call' : 'eth_sendTransaction',
         callback: callback,
-        params: [payload], 
+        params: [payload],
         format: format
     };
 };
@@ -47379,7 +47454,6 @@ module.exports = SolidityFunction;
 /* 265 */
 /***/ (function(module, exports, __webpack_require__) {
 
-"use strict";
 /*
     This file is part of web3.js.
 
@@ -47405,30 +47479,26 @@ module.exports = SolidityFunction;
  */
 
 
-
-var errors = __webpack_require__(32);
+var errors = __webpack_require__(34);
 
 // workaround to use httpprovider in different envs
-var XMLHttpRequest; // jshint ignore: line
-
-// meteor server environment
-if (typeof Meteor !== 'undefined' && Meteor.isServer) { // jshint ignore: line
-    XMLHttpRequest = Npm.require('xmlhttprequest').XMLHttpRequest; // jshint ignore: line
 
 // browser
-} else if (typeof window !== 'undefined' && window.XMLHttpRequest) {
+if (typeof window !== 'undefined' && window.XMLHttpRequest) {
     XMLHttpRequest = window.XMLHttpRequest; // jshint ignore: line
-
 // node
 } else {
     XMLHttpRequest = __webpack_require__(258).XMLHttpRequest; // jshint ignore: line
 }
 
+var XHR2 = __webpack_require__(279); // jshint ignore: line
+
 /**
  * HttpProvider should be used to send rpc calls over http
  */
-var HttpProvider = function (host) {
+var HttpProvider = function (host, timeout) {
     this.host = host || 'http://localhost:8545';
+    this.timeout = timeout || 0;
 };
 
 /**
@@ -47439,7 +47509,15 @@ var HttpProvider = function (host) {
  * @return {XMLHttpRequest} object
  */
 HttpProvider.prototype.prepareRequest = function (async) {
-    var request = new XMLHttpRequest();
+    var request;
+
+    if (async) {
+      request = new XHR2();
+      request.timeout = this.timeout;
+    }else {
+      request = new XMLHttpRequest();
+    }
+
     request.open('POST', this.host, async);
     request.setRequestHeader('Content-Type','application/json');
     return request;
@@ -47466,7 +47544,7 @@ HttpProvider.prototype.send = function (payload) {
     try {
         result = JSON.parse(result);
     } catch(e) {
-        throw errors.InvalidResponse(request.responseText);                
+        throw errors.InvalidResponse(request.responseText);
     }
 
     return result;
@@ -47480,23 +47558,27 @@ HttpProvider.prototype.send = function (payload) {
  * @param {Function} callback triggered on end with (err, result)
  */
 HttpProvider.prototype.sendAsync = function (payload, callback) {
-    var request = this.prepareRequest(true); 
+    var request = this.prepareRequest(true);
 
     request.onreadystatechange = function() {
-        if (request.readyState === 4) {
+        if (request.readyState === 4 && request.timeout !== 1) {
             var result = request.responseText;
             var error = null;
 
             try {
                 result = JSON.parse(result);
             } catch(e) {
-                error = errors.InvalidResponse(request.responseText);                
+                error = errors.InvalidResponse(request.responseText);
             }
 
             callback(error, result);
         }
     };
-    
+
+    request.ontimeout = function() {
+      callback(errors.ConnectionTimeout(this.timeout));
+    };
+
     try {
         request.send(JSON.stringify(payload));
     } catch(error) {
@@ -47525,7 +47607,6 @@ HttpProvider.prototype.isConnected = function() {
 };
 
 module.exports = HttpProvider;
-
 
 
 /***/ }),
@@ -47558,7 +47639,7 @@ module.exports = HttpProvider;
 
 
 var utils = __webpack_require__(4);
-var errors = __webpack_require__(32);
+var errors = __webpack_require__(34);
 
 
 var IpcProvider = function (path, net) {
@@ -47768,7 +47849,7 @@ module.exports = IpcProvider;
  * @date 2015
  */
 
-var Method = __webpack_require__(26);
+var Method = __webpack_require__(17);
 
 var DB = function (web3) {
     this._requestManager = web3._requestManager;
@@ -47846,16 +47927,16 @@ module.exports = DB;
 
 var formatters = __webpack_require__(13);
 var utils = __webpack_require__(4);
-var Method = __webpack_require__(26);
-var Property = __webpack_require__(33);
+var Method = __webpack_require__(17);
+var Property = __webpack_require__(27);
 var c = __webpack_require__(44);
 var Contract = __webpack_require__(262);
 var watches = __webpack_require__(47);
 var Filter = __webpack_require__(45);
-var IsSyncing = __webpack_require__(275);
-var namereg = __webpack_require__(272);
+var IsSyncing = __webpack_require__(276);
+var namereg = __webpack_require__(273);
 var Iban = __webpack_require__(46);
-var transfer = __webpack_require__(276);
+var transfer = __webpack_require__(277);
 
 var blockCall = function (args) {
     return (utils.isString(args[0]) && args[0].indexOf('0x') === 0) ? "eth_getBlockByHash" : "eth_getBlockByNumber";
@@ -47882,12 +47963,12 @@ function Eth(web3) {
 
     var self = this;
 
-    methods().forEach(function(method) { 
+    methods().forEach(function(method) {
         method.attachToObject(self);
         method.setRequestManager(self._requestManager);
     });
 
-    properties().forEach(function(p) { 
+    properties().forEach(function(p) {
         p.attachToObject(self);
         p.setRequestManager(self._requestManager);
     });
@@ -48023,6 +48104,13 @@ var methods = function () {
         inputFormatter: [formatters.inputTransactionFormatter]
     });
 
+    var signTransaction = new Method({
+        name: 'signTransaction',
+        call: 'eth_signTransaction',
+        params: 1,
+        inputFormatter: [formatters.inputTransactionFormatter]
+    });
+
     var sign = new Method({
         name: 'sign',
         call: 'eth_sign',
@@ -48091,6 +48179,7 @@ var methods = function () {
         call,
         estimateGas,
         sendRawTransaction,
+        signTransaction,
         sendTransaction,
         sign,
         compileSolidity,
@@ -48135,6 +48224,10 @@ var properties = function () {
             name: 'blockNumber',
             getter: 'eth_blockNumber',
             outputFormatter: utils.toDecimal
+        }),
+        new Property({
+            name: 'protocolVersion',
+            getter: 'eth_protocolVersion'
         })
     ];
 };
@@ -48161,7 +48254,6 @@ Eth.prototype.isSyncing = function (callback) {
 };
 
 module.exports = Eth;
-
 
 
 /***/ }),
@@ -48191,7 +48283,7 @@ module.exports = Eth;
  */
 
 var utils = __webpack_require__(4);
-var Property = __webpack_require__(33);
+var Property = __webpack_require__(27);
 
 var Net = function (web3) {
     this._requestManager = web3._requestManager;
@@ -48252,8 +48344,8 @@ module.exports = Net;
 
 
 
-var Method = __webpack_require__(26);
-var Property = __webpack_require__(33);
+var Method = __webpack_require__(17);
+var Property = __webpack_require__(27);
 var formatters = __webpack_require__(13);
 
 function Personal(web3) {
@@ -48287,6 +48379,13 @@ var methods = function () {
         inputFormatter: [formatters.inputAddressFormatter, null, null]
     });
 
+    var sendTransaction = new Method({
+        name: 'sendTransaction',
+        call: 'personal_sendTransaction',
+        params: 2,
+        inputFormatter: [formatters.inputTransactionFormatter, null]
+    });
+
     var lockAccount = new Method({
         name: 'lockAccount',
         call: 'personal_lockAccount',
@@ -48297,6 +48396,7 @@ var methods = function () {
     return [
         newAccount,
         unlockAccount,
+        sendTransaction,
         lockAccount
     ];
 };
@@ -48340,7 +48440,7 @@ module.exports = Personal;
  * @date 2015
  */
 
-var Method = __webpack_require__(26);
+var Method = __webpack_require__(17);
 var formatters = __webpack_require__(13);
 var Filter = __webpack_require__(45);
 var watches = __webpack_require__(47);
@@ -48410,6 +48510,158 @@ module.exports = Shh;
 /* 272 */
 /***/ (function(module, exports, __webpack_require__) {
 
+"use strict";
+/*
+    This file is part of web3.js.
+
+    web3.js is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    web3.js is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public License
+    along with web3.js.  If not, see <http://www.gnu.org/licenses/>.
+*/
+/**
+ * @file bzz.js
+ * @author Alex Beregszaszi <alex@rtfs.hu>
+ * @date 2016
+ *
+ * Reference: https://github.com/ethereum/go-ethereum/blob/swarm/internal/web3ext/web3ext.go#L33
+ */
+
+
+
+var Method = __webpack_require__(17);
+var Property = __webpack_require__(27);
+
+function Swarm(web3) {
+    this._requestManager = web3._requestManager;
+
+    var self = this;
+
+    methods().forEach(function(method) {
+        method.attachToObject(self);
+        method.setRequestManager(self._requestManager);
+    });
+
+    properties().forEach(function(p) {
+        p.attachToObject(self);
+        p.setRequestManager(self._requestManager);
+    });
+}
+
+var methods = function () {
+    var blockNetworkRead = new Method({
+        name: 'blockNetworkRead',
+        call: 'bzz_blockNetworkRead',
+        params: 1,
+        inputFormatter: [null]
+    });
+
+    var syncEnabled = new Method({
+        name: 'syncEnabled',
+        call: 'bzz_syncEnabled',
+        params: 1,
+        inputFormatter: [null]
+    });
+
+    var swapEnabled = new Method({
+        name: 'swapEnabled',
+        call: 'bzz_swapEnabled',
+        params: 1,
+        inputFormatter: [null]
+    });
+
+    var download = new Method({
+        name: 'download',
+        call: 'bzz_download',
+        params: 2,
+        inputFormatter: [null, null]
+    });
+
+    var upload = new Method({
+        name: 'upload',
+        call: 'bzz_upload',
+        params: 2,
+        inputFormatter: [null, null]
+    });
+
+    var retrieve = new Method({
+        name: 'retrieve',
+        call: 'bzz_retrieve',
+        params: 1,
+        inputFormatter: [null]
+    });
+
+    var store = new Method({
+        name: 'store',
+        call: 'bzz_store',
+        params: 2,
+        inputFormatter: [null, null]
+    });
+
+    var get = new Method({
+        name: 'get',
+        call: 'bzz_get',
+        params: 1,
+        inputFormatter: [null]
+    });
+
+    var put = new Method({
+        name: 'put',
+        call: 'bzz_put',
+        params: 2,
+        inputFormatter: [null, null]
+    });
+
+    var modify = new Method({
+        name: 'modify',
+        call: 'bzz_modify',
+        params: 4,
+        inputFormatter: [null, null, null, null]
+    });
+
+    return [
+        blockNetworkRead,
+        syncEnabled,
+        swapEnabled,
+        download,
+        upload,
+        retrieve,
+        store,
+        get,
+        put,
+        modify
+    ];
+};
+
+var properties = function () {
+    return [
+        new Property({
+            name: 'hive',
+            getter: 'bzz_hive'
+        }),
+        new Property({
+            name: 'info',
+            getter: 'bzz_info'
+        })
+    ];
+};
+
+
+module.exports = Swarm;
+
+
+/***/ }),
+/* 273 */
+/***/ (function(module, exports, __webpack_require__) {
+
 /*
     This file is part of web3.js.
 
@@ -48452,7 +48704,7 @@ module.exports = {
 
 
 /***/ }),
-/* 273 */
+/* 274 */
 /***/ (function(module, exports, __webpack_require__) {
 
 /*
@@ -48484,7 +48736,7 @@ module.exports = {
 var Jsonrpc = __webpack_require__(98);
 var utils = __webpack_require__(4);
 var c = __webpack_require__(44);
-var errors = __webpack_require__(32);
+var errors = __webpack_require__(34);
 
 /**
  * It's responsible for passing messages to providers
@@ -48511,10 +48763,10 @@ RequestManager.prototype.send = function (data) {
         return null;
     }
 
-    var payload = Jsonrpc.getInstance().toPayload(data.method, data.params);
+    var payload = Jsonrpc.toPayload(data.method, data.params);
     var result = this.provider.send(payload);
 
-    if (!Jsonrpc.getInstance().isValidResponse(result)) {
+    if (!Jsonrpc.isValidResponse(result)) {
         throw errors.InvalidResponse(result);
     }
 
@@ -48533,13 +48785,13 @@ RequestManager.prototype.sendAsync = function (data, callback) {
         return callback(errors.InvalidProvider());
     }
 
-    var payload = Jsonrpc.getInstance().toPayload(data.method, data.params);
+    var payload = Jsonrpc.toPayload(data.method, data.params);
     this.provider.sendAsync(payload, function (err, result) {
         if (err) {
             return callback(err);
         }
         
-        if (!Jsonrpc.getInstance().isValidResponse(result)) {
+        if (!Jsonrpc.isValidResponse(result)) {
             return callback(errors.InvalidResponse(result));
         }
 
@@ -48559,7 +48811,7 @@ RequestManager.prototype.sendBatch = function (data, callback) {
         return callback(errors.InvalidProvider());
     }
 
-    var payload = Jsonrpc.getInstance().toBatchPayload(data);
+    var payload = Jsonrpc.toBatchPayload(data);
 
     this.provider.sendAsync(payload, function (err, results) {
         if (err) {
@@ -48674,7 +48926,7 @@ RequestManager.prototype.poll = function () {
         return;
     }
 
-    var payload = Jsonrpc.getInstance().toBatchPayload(pollsData);
+    var payload = Jsonrpc.toBatchPayload(pollsData);
     
     // map the request id to they poll id
     var pollsIdMap = {};
@@ -48707,7 +48959,7 @@ RequestManager.prototype.poll = function () {
         }).filter(function (result) {
             return !!result; 
         }).filter(function (result) {
-            var valid = Jsonrpc.getInstance().isValidResponse(result);
+            var valid = Jsonrpc.isValidResponse(result);
             if (!valid) {
                 result.callback(errors.InvalidResponse(result));
             }
@@ -48723,7 +48975,7 @@ module.exports = RequestManager;
 
 
 /***/ }),
-/* 274 */
+/* 275 */
 /***/ (function(module, exports) {
 
 
@@ -48738,7 +48990,7 @@ module.exports = Settings;
 
 
 /***/ }),
-/* 275 */
+/* 276 */
 /***/ (function(module, exports, __webpack_require__) {
 
 /*
@@ -48837,7 +49089,7 @@ module.exports = IsSyncing;
 
 
 /***/ }),
-/* 276 */
+/* 277 */
 /***/ (function(module, exports, __webpack_require__) {
 
 /*
@@ -48935,7 +49187,7 @@ module.exports = transfer;
 
 
 /***/ }),
-/* 277 */
+/* 278 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -49183,16 +49435,11 @@ function noop() {}
 
 
 /***/ }),
-/* 278 */
-/***/ (function(module, exports) {
-
-/* (ignored) */
-
-/***/ }),
 /* 279 */
 /***/ (function(module, exports) {
 
-/* (ignored) */
+module.exports = XMLHttpRequest;
+
 
 /***/ }),
 /* 280 */
@@ -49202,6 +49449,18 @@ function noop() {}
 
 /***/ }),
 /* 281 */
+/***/ (function(module, exports) {
+
+/* (ignored) */
+
+/***/ }),
+/* 282 */
+/***/ (function(module, exports) {
+
+/* (ignored) */
+
+/***/ }),
+/* 283 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";

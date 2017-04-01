@@ -33,7 +33,8 @@
     "json-loader": "^0.5.4",
     "ledgerco": "^1.1.2",
     "u2f-api": "^0.0.9",
-    "web3-provider-engine": "^11.0.0",
+    "web3": "^0.18.4",
+    "web3-provider-engine": "git+https://github.com/denisgranha/provider-engine.git",
     "web3-stream-provider": "^2.0.8",
     "webpack": "^2.2.1"
   }
