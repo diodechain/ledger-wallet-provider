@@ -37,7 +37,7 @@ const NOT_SUPPORTED_ERROR_MSG =
  *
  */
 class LedgerWallet {
-    constructor(opts) {        
+    constructor(opts) {
         this._path = "44'/60'/0'/0";
         this._accounts = undefined;
         this.isU2FSupported = null;
@@ -47,6 +47,7 @@ class LedgerWallet {
         this._getLedgerConnection = this._getLedgerConnection.bind(this);
         this._onSubmit = opts.onSubmit;
         this._onSigned = opts.onSigned;
+        this._getChainID = opts.getChainID || web3.version.getNetwork;
     }
 
     async init() {
@@ -168,7 +169,7 @@ class LedgerWallet {
         let tx = new EthereumTx(txData);
 
         // Fetch the chain id
-        web3.version.getNetwork(async function (error, chain_id) {
+        this._getChainID(async function (error, chain_id) {
             if (error) {
               this.closeSpinner();
               callback(error);

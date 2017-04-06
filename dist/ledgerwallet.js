@@ -28711,6 +28711,7 @@ var LedgerWallet = function () {
         this._getLedgerConnection = this._getLedgerConnection.bind(this);
         this._onSubmit = opts.onSubmit;
         this._onSigned = opts.onSigned;
+        this._getChainID = opts.getChainID || web3.version.getNetwork;
     }
 
     (0, _createClass3.default)(LedgerWallet, [{
@@ -28839,7 +28840,7 @@ var LedgerWallet = function () {
             var tx = new _ethereumjsTx2.default(txData);
 
             // Fetch the chain id
-            web3.version.getNetwork(async function (error, chain_id) {
+            this._getChainID(async function (error, chain_id) {
                 var _this3 = this;
 
                 if (error) {
