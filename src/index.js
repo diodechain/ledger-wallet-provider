@@ -12,7 +12,8 @@ export default async function (opts) {
     const ledger = new LedgerWallet(
       {
         onSubmit: opts.onSubmit,
-        onSigned: opts.onSigned
+        onSigned: opts.onSigned,
+        getChainID: opts.getChainID
       }
     );
     await ledger.init();

@@ -50995,7 +50995,8 @@ exports.default = async function (opts) {
 
   var ledger = new _LedgerWallet2.default({
     onSubmit: opts.onSubmit,
-    onSigned: opts.onSigned
+    onSigned: opts.onSigned,
+    getChainID: opts.getChainID
   });
   await ledger.init();
   var LedgerWalletSubprovider = new _hookedWallet2.default(ledger);
