@@ -47,7 +47,7 @@ class LedgerWallet {
         this._getLedgerConnection = this._getLedgerConnection.bind(this);
         this._onSubmit = opts.onSubmit;
         this._onSigned = opts.onSigned;
-        this._getChainID = opts.getChainID || window.web3?window.web3.version.getNetwork:null;
+        this._getChainID = opts.getChainID;
     }
 
     async init() {
@@ -173,6 +173,7 @@ class LedgerWallet {
             if (error) {
               this.closeSpinner();
               callback(error);
+              return;
             }
 
             // Force chain_id to int
