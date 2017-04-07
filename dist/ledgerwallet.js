@@ -28938,7 +28938,7 @@ var LedgerWallet = function () {
         this._getLedgerConnection = this._getLedgerConnection.bind(this);
         this._onSubmit = opts.onSubmit;
         this._onSigned = opts.onSigned;
-        this._getChainID = opts.getChainID || web3.version.getNetwork;
+        this._getChainID = opts.getChainID || window.web3 ? window.web3.version.getNetwork : null;
     }
 
     (0, _createClass3.default)(LedgerWallet, [{
