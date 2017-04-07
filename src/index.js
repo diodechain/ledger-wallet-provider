@@ -26,11 +26,14 @@ export default async function (opts) {
     var engine = new ProviderEngine();
     var web3 = new Web3(engine);
     engine.addProvider(LedgerWalletSubprovider);
-    engine.addProvider(new RpcSubprovider(
-      {
-        rpcUrl: opts.rpcUrl || "https://kovan.infura.io:443"
-      }
-    ));
+    // Node optional, not used on offline mode
+    if (opts.rpcUrl) {
+      engine.addProvider(new RpcSubprovider(
+        {
+          rpcUrl: opts.rpcUrl
+        }
+      ));
+    }
     engine.start();
     return web3;
 };

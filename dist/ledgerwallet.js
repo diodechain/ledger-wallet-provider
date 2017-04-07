@@ -49513,9 +49513,12 @@ exports.default = async function (opts) {
   var engine = new _web3ProviderEngine2.default();
   var web3 = new _web2.default(engine);
   engine.addProvider(LedgerWalletSubprovider);
-  engine.addProvider(new _rpc2.default({
-    rpcUrl: opts.rpcUrl || "https://kovan.infura.io:443"
-  }));
+  // Node optional, not used on offline mode
+  if (opts.rpcUrl) {
+    engine.addProvider(new _rpc2.default({
+      rpcUrl: opts.rpcUrl
+    }));
+  }
   engine.start();
   return web3;
 };
