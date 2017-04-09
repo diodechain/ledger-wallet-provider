@@ -29070,12 +29070,6 @@ var LedgerWallet = function () {
             this._getChainID(async function (error, chain_id) {
                 var _this3 = this;
 
-                if (error) {
-                    this.closeSpinner();
-                    callback(error);
-                    return;
-                }
-
                 // Force chain_id to int
                 chain_id = 0 | chain_id;
 
@@ -29093,25 +29087,30 @@ var LedgerWallet = function () {
                     _this3.closeSpinner();
                     callback(error, data);
                 };
-                // Pass to _ledger for signing
-                eth.signTransaction_async(this._path, hex).then(function (result) {
-                    // Store signature in transaction
-                    tx.v = new Buffer(result.v, "hex");
-                    tx.r = new Buffer(result.r, "hex");
-                    tx.s = new Buffer(result.s, "hex");
 
-                    // EIP155: v should be chain_id * 2 + {35, 36}
-                    var signed_chain_id = Math.floor((tx.v[0] - 35) / 2);
-                    if (signed_chain_id !== chain_id) {
-                        cleanupCallback("Invalid signature received. Please update your Ledger Nano S.");
-                    }
+                if (error) {
+                    cleanupCallback(error);
+                } else {
+                    // Pass to _ledger for signing
+                    eth.signTransaction_async(this._path, hex).then(function (result) {
+                        // Store signature in transaction
+                        tx.v = new Buffer(result.v, "hex");
+                        tx.r = new Buffer(result.r, "hex");
+                        tx.s = new Buffer(result.s, "hex");
 
-                    // Return the signed raw transaction
-                    var rawTx = "0x" + tx.serialize().toString("hex");
-                    cleanupCallback(undefined, rawTx);
-                }).catch(function (error) {
-                    return cleanupCallback(error);
-                });
+                        // EIP155: v should be chain_id * 2 + {35, 36}
+                        var signed_chain_id = Math.floor((tx.v[0] - 35) / 2);
+                        if (signed_chain_id !== chain_id) {
+                            cleanupCallback("Invalid signature received. Please update your Ledger Nano S.");
+                        }
+
+                        // Return the signed raw transaction
+                        var rawTx = "0x" + tx.serialize().toString("hex");
+                        cleanupCallback(undefined, rawTx);
+                    }).catch(function (error) {
+                        return cleanupCallback(error);
+                    });
+                }
             }.bind(this));
         }
     }], [{
