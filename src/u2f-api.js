@@ -552,7 +552,7 @@ u2f.getIframePort_ = function(callback) {
  * Default extension response timeout in seconds.
  * @const
  */
-u2f.EXTENSION_TIMEOUT_SEC = 30;
+u2f.EXTENSION_TIMEOUT_SEC = 120;
 
 /**
  * A singleton instance for a MessagePort to the extension.

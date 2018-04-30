@@ -1,12 +1,13 @@
 {
   "name": "ledger-wallet-provider",
-  "version": "1.14.11",
+  "version": "1.15.0",
   "description": "Ledger Nano S wallet provider for the Web3 ProviderEngine",
   "main": "lib/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "babel src --out-dir lib",
-    "prepublish": "npm run build"
+    "prepublish": "npm run build",
+    "build-web": "webpack"
   },
   "repository": {
     "type": "git",
