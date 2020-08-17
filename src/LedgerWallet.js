@@ -1,4 +1,5 @@
-import ledger from 'ledgerco/src/index-browserify';
+import Eth from "@ledgerhq/hw-app-eth";
+import TransportU2F from "@ledgerhq/hw-transport-u2f";
 import EthereumTx from 'ethereumjs-tx';
 import u2f from './u2f-api';
 if (window.u2f === undefined) window.u2f = u2f;
@@ -20,6 +21,10 @@ const NOT_SUPPORTED_ERROR_MSG =
  *  MyEtherWallet.com by default uses the range
  *
  *   * 44'/60'/0'/n
+ * 
+ *  Ledger Live Default
+ * 
+ *   * 44'/60'/0'/0/0
  *
  *  Note: no hardend derivation on the `n`
  *
@@ -38,7 +43,7 @@ const NOT_SUPPORTED_ERROR_MSG =
  */
 class LedgerWallet {
     constructor(opts) {
-        this._path = "44'/60'/0'/0";
+        this._path = "44'/60'/0'/0/0";
         this._accounts = undefined;
         this.isU2FSupported = null;
         this.getAppConfig = this.getAppConfig.bind(this);
@@ -90,11 +95,11 @@ class LedgerWallet {
     };
 
     async _getLedgerConnection() {
-        return new ledger.eth(await ledger.comm_u2f.create_async());
+        return new Eth(await TransportU2F.create());
     }
 
     async _closeLedgerConnection(eth) {
-        eth.comm.close_async()
+        await eth.transport.close()
     }
 
     /**
@@ -119,7 +124,7 @@ class LedgerWallet {
             this._closeLedgerConnection(eth);
             callback(error, data);
         };
-        eth.getAppConfiguration_async()
+        eth.getAppConfiguration()
             .then(config => cleanupCallback(null, config))
             .catch(error => cleanupCallback(error))
     }
@@ -144,7 +149,7 @@ class LedgerWallet {
             this._closeLedgerConnection(eth);
             callback(error, data);
         };
-        eth.getAddress_async(this._path, askForOnDeviceConfirmation, chainCode)
+        eth.getAddress(this._path, askForOnDeviceConfirmation, chainCode)
             .then(result => {
                 this._accounts = [result.address.toLowerCase()];
                 cleanupCallback(null, this._accounts);
@@ -193,7 +198,7 @@ class LedgerWallet {
             }
             else {
               // Pass to _ledger for signing
-              eth.signTransaction_async(this._path, hex)
+              eth.signTransaction(this._path, hex)
                   .then(result => {
                       // Store signature in transaction
                       tx.v = new Buffer(result.v, "hex");
